@@ -19,8 +19,8 @@ jobs:
           script: |
             export NVM_DIR="$HOME/.nvm"
             [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-            cd /var/www/buvard-api-prod
+            cd /var/www/buvard-api
             git pull origin main
             npm ci
             npm run build
-            pm2 reload buvard-api-prod --update-env || pm2 start dist/server.js --name buvard-api-prod --update-env
+            pm2 reload buvard-api --update-env || pm2 start dist/server.js --name buvard-api --update-env
