@@ -1,0 +1,17 @@
+node_modules
+dist
+coverage
+
+.env
+.env.local
+.env.*.local
+
+.DS_Store
+Thumbs.db
+
+*.log
+logs
+
+.idea
+.vscode
+*.swp
