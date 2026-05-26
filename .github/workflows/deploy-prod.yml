@@ -16,20 +16,29 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Deploy to Hostman VPS
-        uses: appleboy/ssh-action@v1.0.0
+        uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT }}
+          timeout: 60s
+          command_timeout: 15m
           script_stop: true
+          debug: true
           script: |
-            set -e
-            export NVM_DIR="$HOME/.nvm"
-            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+            set -ex
+            # Charge l'env shell (PATH user-level, npm-global, etc.)
+            [ -f "$HOME/.profile" ] && . "$HOME/.profile" || true
+            [ -f "$HOME/.bashrc" ] && . "$HOME/.bashrc" || true
+            # Garantit que les bins courants sont dans le PATH meme si rien n'est source
+            export PATH="/usr/local/bin:/usr/bin:/bin:$HOME/.npm-global/bin:$HOME/.local/bin:$PATH"
+            echo "PATH=$PATH"
+            echo "node=$(command -v node) npm=$(command -v npm) pm2=$(command -v pm2)"
             cd /var/www/buvard-api
             git fetch origin main
             git reset --hard origin/main
             npm ci
             npm run build
             pm2 reload buvard-api --update-env || pm2 start dist/server.js --name buvard-api --update-env
+            pm2 save
