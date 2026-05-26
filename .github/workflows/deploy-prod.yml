@@ -5,6 +5,12 @@ on:
     branches:
       - main
 
+# Empeche 2 deploys en parallele: si un push arrive pendant qu'un deploy tourne,
+# l'ancien est annule et le nouveau prend la main (le code final sur le VPS = le dernier push)
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: true
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
