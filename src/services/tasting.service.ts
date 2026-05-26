@@ -2,11 +2,8 @@ import type { Types } from 'mongoose';
 import { AppError } from '../utils/AppError.js';
 import { TastingModel, type TastingDoc } from '../models/Tasting.js';
 import type { UserDoc } from '../models/User.js';
-import type {
-  CreateTastingInput,
-  ListTastingsQuery,
-  UpdateTastingInput,
-} from '../zod/tasting.zod.js';
+import { decrementTastingStats, incrementTastingStats } from './user.service.js';
+import type { CreateTastingInput, ListTastingsQuery, UpdateTastingInput } from '../zod/tasting.zod.js';
 
 export interface PaginatedTastings {
   data: TastingDoc[];
@@ -20,17 +17,13 @@ function isOwner(tasting: TastingDoc, user: UserDoc): boolean {
   return tasting.userId.toString() === user._id.toString();
 }
 
-export async function createTasting(
-  user: UserDoc,
-  input: CreateTastingInput,
-): Promise<TastingDoc> {
-  return TastingModel.create({ ...input, userId: user._id });
+export async function createTasting(user: UserDoc, input: CreateTastingInput): Promise<TastingDoc> {
+  const tasting = await TastingModel.create({ ...input, userId: user._id });
+  await incrementTastingStats(user._id, tasting.type);
+  return tasting;
 }
 
-export async function listMyTastings(
-  user: UserDoc,
-  query: ListTastingsQuery,
-): Promise<PaginatedTastings> {
+export async function listMyTastings(user: UserDoc, query: ListTastingsQuery): Promise<PaginatedTastings> {
   const filter: Record<string, unknown> = { userId: user._id, deletedAt: null };
   if (query.type) filter.type = query.type;
 
@@ -51,10 +44,7 @@ export async function listMyTastings(
   };
 }
 
-export async function listPublicTastingsForUser(
-  userId: Types.ObjectId,
-  query: ListTastingsQuery,
-): Promise<PaginatedTastings> {
+export async function listPublicTastingsForUser(userId: Types.ObjectId, query: ListTastingsQuery): Promise<PaginatedTastings> {
   const filter: Record<string, unknown> = {
     userId,
     visibility: 'public',
@@ -79,10 +69,7 @@ export async function listPublicTastingsForUser(
   };
 }
 
-export async function getTastingForViewer(
-  id: string,
-  viewer: UserDoc | null,
-): Promise<TastingDoc> {
+export async function getTastingForViewer(id: string, viewer: UserDoc | null): Promise<TastingDoc> {
   const tasting = await TastingModel.findOne({ _id: id, deletedAt: null });
   if (!tasting) throw AppError.notFound('Tasting introuvable');
 
@@ -91,17 +78,23 @@ export async function getTastingForViewer(
   throw AppError.forbidden();
 }
 
-export async function updateTasting(
-  user: UserDoc,
-  id: string,
-  input: UpdateTastingInput,
-): Promise<TastingDoc> {
+export async function updateTasting(user: UserDoc, id: string, input: UpdateTastingInput): Promise<TastingDoc> {
   const tasting = await TastingModel.findOne({ _id: id, deletedAt: null });
   if (!tasting) throw AppError.notFound('Tasting introuvable');
   if (!isOwner(tasting, user)) throw AppError.forbidden();
 
+  const previousType = tasting.type;
   Object.assign(tasting, input);
   await tasting.save();
+
+  // Si le type a change, on rebalance les compteurs par categorie
+  // (tastingsCount reste net car decrement -1 + increment +1 = 0)
+  if (input.type && input.type !== previousType) {
+    await Promise.all([
+      decrementTastingStats(user._id, previousType),
+      incrementTastingStats(user._id, tasting.type),
+    ]);
+  }
   return tasting;
 }
 
@@ -112,4 +105,5 @@ export async function deleteTasting(user: UserDoc, id: string): Promise<void> {
 
   tasting.deletedAt = new Date();
   await tasting.save();
+  await decrementTastingStats(user._id, tasting.type);
 }

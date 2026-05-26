@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>Buvard API</title>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family:
+          -apple-system,
+          BlinkMacSystemFont,
+          'Segoe UI',
+          Roboto,
+          sans-serif;
+        background-color: #0d0c10;
+        background-image: radial-gradient(
+          circle at 20% 0%,
+          rgba(139, 38, 53, 0.55) 0%,
+          transparent 55%
+        );
+        background-attachment: fixed;
+        color: #e8e8ea;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem 1rem;
+        line-height: 1.5;
+      }
+
+      .container {
+        max-width: 560px;
+        width: 100%;
+      }
+
+      .header {
+        display: flex;
+        align-items: baseline;
+        gap: 0.75rem;
+        margin-bottom: 0.4rem;
+        flex-wrap: wrap;
+      }
+
+      h1 {
+        font-size: 1.85rem;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+        background: linear-gradient(180deg, #f5f5f7 0%, #b4b4ba 100%);
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+      }
+
+      .badge {
+        font-size: 0.72rem;
+        padding: 0.22rem 0.55rem;
+        border-radius: 999px;
+        background: #1f1d24;
+        border: 1px solid #2c2932;
+        color: #9d9aa6;
+        font-family: 'SF Mono', Menlo, Consolas, monospace;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+
+      .tagline {
+        color: #888894;
+        margin-bottom: 2rem;
+        font-size: 0.95rem;
+      }
+
+      .card {
+        background: #16151b;
+        border: 1px solid #25232c;
+        border-radius: 10px;
+        padding: 1.1rem 1.25rem;
+        margin-bottom: 1rem;
+      }
+
+      .card-title {
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #6f6c78;
+        margin-bottom: 0.85rem;
+      }
+
+      .row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.45rem 0;
+        font-family: 'SF Mono', Menlo, Consolas, monospace;
+        font-size: 0.85rem;
+      }
+
+      .row + .row {
+        border-top: 1px solid #1f1e25;
+      }
+
+      .key {
+        color: #6f6c78;
+      }
+
+      .value {
+        color: #e8e8ea;
+      }
+
+      .status-ok {
+        color: #5dd4a0;
+      }
+
+      .status-down {
+        color: #f47b7b;
+      }
+
+      footer {
+        margin-top: 1.5rem;
+        font-size: 0.75rem;
+        color: #55525d;
+        text-align: center;
+        font-family: 'SF Mono', Menlo, Consolas, monospace;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1>Buvard API</h1>
+        <span class="badge">{{ENV}}</span>
+      </div>
+      <p class="tagline">API de degustation d'alcools — whisky, vin, rhum, biere.</p>
+
+      <div class="card">
+        <div class="card-title">Statut</div>
+        <div class="row">
+          <span class="key">version</span><span class="value">{{VERSION}}</span>
+        </div>
+        <div class="row">
+          <span class="key">uptime</span><span class="value">{{UPTIME}}</span>
+        </div>
+        <div class="row">
+          <span class="key">heure serveur</span><span class="value">{{TIME}}</span>
+        </div>
+      </div>
+
+      <footer>buvard-api</footer>
+    </div>
+  </body>
+</html>

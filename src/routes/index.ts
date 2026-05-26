@@ -1,8 +1,16 @@
 import { Router } from 'express';
-import { userRouter } from './user.route.js';
-import { tastingRouter } from './tasting.route.js';
+import { v1Router } from './v1/index.js';
 
 export const apiRouter: Router = Router();
 
-apiRouter.use('/users', userRouter);
-apiRouter.use('/tastings', tastingRouter);
+apiRouter.get('/', (_req, res) => {
+  res.json({
+    name: 'buvard-api',
+    versions: {
+      v1: '/api/v1',
+    },
+    current: 'v1',
+  });
+});
+
+apiRouter.use('/v1', v1Router);
