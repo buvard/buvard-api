@@ -78,6 +78,18 @@ export const listFollowsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
 });
 
+export const searchUsersQuerySchema = z.object({
+  q: z.string().trim().min(2).max(32),
+  limit: z.coerce.number().int().min(1).max(20).default(10),
+});
+
+export const mentionsQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+});
+
 export type UpdateMeInput = z.infer<typeof updateMeSchema>;
 export type UpdatePrefsInput = z.infer<typeof updatePrefsSchema>;
 export type ListFollowsQuery = z.infer<typeof listFollowsQuerySchema>;
+export type SearchUsersQuery = z.infer<typeof searchUsersQuerySchema>;
+export type MentionsQuery = z.infer<typeof mentionsQuerySchema>;

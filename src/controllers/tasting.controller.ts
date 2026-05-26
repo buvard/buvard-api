@@ -7,6 +7,8 @@ import {
   getTastingForViewer,
   listMyTastings,
   listPublicTastingsForUser,
+  removeTastingPhoto,
+  setTastingPhoto,
   updateTasting,
 } from '../services/tasting.service.js';
 import type {
@@ -59,4 +61,21 @@ export async function listForPublicProfile(req: Request, res: Response): Promise
     req.query as unknown as ListTastingsQuery,
   );
   res.json({ ...result, data: result.data.map(serialize) });
+}
+
+// --- Photo de tasting ---
+
+export async function postTastingPhoto(req: Request, res: Response): Promise<void> {
+  if (!req.user) throw AppError.unauthorized();
+  if (!req.file) throw AppError.badRequest('Fichier requis (field "file")');
+  const { id } = req.params as { id: string };
+  const tasting = await setTastingPhoto(req.user, id, req.file.buffer);
+  res.json({ photoUrl: tasting.photoUrl });
+}
+
+export async function deleteTastingPhoto(req: Request, res: Response): Promise<void> {
+  if (!req.user) throw AppError.unauthorized();
+  const { id } = req.params as { id: string };
+  await removeTastingPhoto(req.user, id);
+  res.status(204).end();
 }

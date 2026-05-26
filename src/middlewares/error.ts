@@ -1,5 +1,6 @@
 import type { ErrorRequestHandler } from 'express';
 import { MongooseError } from 'mongoose';
+import { MulterError } from 'multer';
 import { ZodError } from 'zod';
 import { AppError } from '../utils/AppError.js';
 import { logger } from '../config/logger.js';
@@ -30,6 +31,14 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
   if (err instanceof MongooseError) {
     res.status(400).json({
       error: { code: 'BAD_REQUEST', message: err.message },
+    } satisfies ErrorBody);
+    return;
+  }
+
+  if (err instanceof MulterError) {
+    const message = err.code === 'LIMIT_FILE_SIZE' ? 'Fichier trop volumineux' : err.message;
+    res.status(400).json({
+      error: { code: 'BAD_REQUEST', message },
     } satisfies ErrorBody);
     return;
   }

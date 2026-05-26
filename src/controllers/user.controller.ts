@@ -12,13 +12,25 @@ import {
   listBlocks,
   listFollowers,
   listFollowing,
+  removeAvatar,
+  removeCover,
+  searchUsers,
+  setAvatar,
+  setCover,
   softDeleteMe,
   unblockUser,
   unfollowUser,
   updateMe,
   updatePrefs,
 } from '../services/user.service.js';
-import type { ListFollowsQuery, UpdateMeInput, UpdatePrefsInput } from '../zod/user.zod.js';
+import { listMentionsForUser } from '../services/mentions.service.js';
+import type {
+  ListFollowsQuery,
+  MentionsQuery,
+  SearchUsersQuery,
+  UpdateMeInput,
+  UpdatePrefsInput,
+} from '../zod/user.zod.js';
 
 export async function getMe(req: Request, res: Response): Promise<void> {
   if (!req.user) throw AppError.unauthorized();
@@ -155,4 +167,47 @@ export async function getMyBlocks(req: Request, res: Response): Promise<void> {
   if (!req.user) throw AppError.unauthorized();
   const result = await listBlocks(req.user, req.query as unknown as ListFollowsQuery);
   res.json(result);
+}
+
+// --- Avatar & Cover ---
+
+export async function postAvatar(req: Request, res: Response): Promise<void> {
+  if (!req.user) throw AppError.unauthorized();
+  if (!req.file) throw AppError.badRequest('Fichier requis (field "file")');
+  const updated = await setAvatar(req.user, req.file.buffer);
+  res.json({ avatarUrl: updated.avatarUrl });
+}
+
+export async function deleteAvatar(req: Request, res: Response): Promise<void> {
+  if (!req.user) throw AppError.unauthorized();
+  await removeAvatar(req.user);
+  res.status(204).end();
+}
+
+export async function postCover(req: Request, res: Response): Promise<void> {
+  if (!req.user) throw AppError.unauthorized();
+  if (!req.file) throw AppError.badRequest('Fichier requis (field "file")');
+  const updated = await setCover(req.user, req.file.buffer);
+  res.json({ coverUrl: updated.coverUrl });
+}
+
+export async function deleteCover(req: Request, res: Response): Promise<void> {
+  if (!req.user) throw AppError.unauthorized();
+  await removeCover(req.user);
+  res.status(204).end();
+}
+
+// --- Mentions & search ---
+
+export async function getMyMentions(req: Request, res: Response): Promise<void> {
+  if (!req.user) throw AppError.unauthorized();
+  const { page, limit } = req.query as unknown as MentionsQuery;
+  const result = await listMentionsForUser(req.user._id, page, limit);
+  res.json(result);
+}
+
+export async function getSearchUsers(req: Request, res: Response): Promise<void> {
+  const { q, limit } = req.query as unknown as SearchUsersQuery;
+  const data = await searchUsers(q, limit, req.user ?? null);
+  res.json({ data });
 }

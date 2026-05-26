@@ -1,10 +1,13 @@
 import { clerkClient } from '@clerk/express';
 import type { Types } from 'mongoose';
+import sharp from 'sharp';
 import { AppError } from '../utils/AppError.js';
 import { UserModel, type UserDoc } from '../models/User.js';
 import { TastingModel } from '../models/Tasting.js';
 import { FollowModel } from '../models/Follow.js';
 import { BlockModel } from '../models/Block.js';
+import { deleteObject, extractKeyFromPublicUrl, uploadBuffer } from './storage.service.js';
+import { clearMentions, syncMentions } from './mentions.service.js';
 import type { ListFollowsQuery, UpdateMeInput, UpdatePrefsInput } from '../zod/user.zod.js';
 
 // Valeurs par defaut des prefs — utilisees aussi en fallback pour d'eventuels users legacy
@@ -160,6 +163,7 @@ export async function softDeleteUserByClerkId(clerkId: string): Promise<void> {
 export async function softDeleteMe(user: UserDoc): Promise<void> {
   user.deletedAt = new Date();
   await user.save();
+  await clearMentions('bio', user._id);
 }
 
 export async function getUserByUsername(username: string): Promise<UserDoc> {
@@ -175,6 +179,7 @@ export async function updateMe(user: UserDoc, input: UpdateMeInput): Promise<Use
     user.username = input.username;
   }
   if (input.displayName !== undefined) user.displayName = input.displayName;
+  const bioChanged = input.bio !== undefined && input.bio !== user.bio;
   if (input.bio !== undefined) user.bio = input.bio;
   if (input.avatarUrl !== undefined) user.avatarUrl = input.avatarUrl;
   if (input.coverUrl !== undefined) user.coverUrl = input.coverUrl;
@@ -187,6 +192,16 @@ export async function updateMe(user: UserDoc, input: UpdateMeInput): Promise<Use
     };
   }
   await user.save();
+
+  // Re-synchronise les mentions de la bio si elle a change
+  if (bioChanged) {
+    await syncMentions({
+      sourceType: 'bio',
+      sourceId: user._id,
+      mentionerId: user._id,
+      text: user.bio,
+    });
+  }
   return user;
 }
 
@@ -450,6 +465,142 @@ export async function listBlocks(actor: UserDoc, query: ListFollowsQuery): Promi
     }));
 
   return { data, page: query.page, limit: query.limit, total, hasMore: query.page * query.limit < total };
+}
+
+// --- Images: avatar & cover ---
+
+// Dimensions cibles apres resize. WebP qualite 85 = excellent compromis qualite/poids.
+const AVATAR_SIZE = 400;
+const COVER_WIDTH = 1500;
+const COVER_HEIGHT = 500;
+const WEBP_QUALITY = 85;
+
+interface ImageVariant {
+  field: 'avatarUrl' | 'coverUrl';
+  prefix: 'avatars' | 'covers';
+  resize: (input: Buffer) => sharp.Sharp;
+}
+
+const AVATAR_VARIANT: ImageVariant = {
+  field: 'avatarUrl',
+  prefix: 'avatars',
+  resize: (input) => sharp(input).rotate().resize(AVATAR_SIZE, AVATAR_SIZE, { fit: 'cover' }),
+};
+
+const COVER_VARIANT: ImageVariant = {
+  field: 'coverUrl',
+  prefix: 'covers',
+  resize: (input) => sharp(input).rotate().resize(COVER_WIDTH, COVER_HEIGHT, { fit: 'cover' }),
+};
+
+async function processAndStoreImage(user: UserDoc, file: Buffer, variant: ImageVariant): Promise<string> {
+  const optimized = await variant.resize(file).webp({ quality: WEBP_QUALITY }).toBuffer();
+  const key = `${variant.prefix}/${String(user._id)}/${Date.now()}.webp`;
+  const { publicUrl } = await uploadBuffer(key, optimized, 'image/webp');
+  return publicUrl;
+}
+
+async function deleteOldImage(previousUrl: string | undefined | null): Promise<void> {
+  const key = extractKeyFromPublicUrl(previousUrl);
+  if (key) await deleteObject(key);
+}
+
+export async function setAvatar(user: UserDoc, file: Buffer): Promise<UserDoc> {
+  const previous = user.avatarUrl;
+  const newUrl = await processAndStoreImage(user, file, AVATAR_VARIANT);
+  user.avatarUrl = newUrl;
+  await user.save();
+  // Best-effort: on supprime l'ancien apres le save reussi
+  if (previous && previous !== newUrl) await deleteOldImage(previous);
+  return user;
+}
+
+export async function setCover(user: UserDoc, file: Buffer): Promise<UserDoc> {
+  const previous = user.coverUrl;
+  const newUrl = await processAndStoreImage(user, file, COVER_VARIANT);
+  user.coverUrl = newUrl;
+  await user.save();
+  if (previous && previous !== newUrl) await deleteOldImage(previous);
+  return user;
+}
+
+export async function removeAvatar(user: UserDoc): Promise<UserDoc> {
+  const previous = user.avatarUrl;
+  if (!previous) return user;
+  user.avatarUrl = undefined;
+  await user.save();
+  await deleteOldImage(previous);
+  return user;
+}
+
+export async function removeCover(user: UserDoc): Promise<UserDoc> {
+  const previous = user.coverUrl;
+  if (!previous) return user;
+  user.coverUrl = undefined;
+  await user.save();
+  await deleteOldImage(previous);
+  return user;
+}
+
+// --- Search users (autocomplete @mention, etc.) ---
+
+interface UserSearchResult {
+  id: string;
+  username: string;
+  displayName?: string | null;
+  avatarUrl?: string | null;
+  verified: boolean;
+}
+
+// Escape les caracteres regex pour eviter une injection via la query
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export async function searchUsers(
+  q: string,
+  limit: number,
+  viewer: UserDoc | null,
+): Promise<UserSearchResult[]> {
+  const safe = escapeRegex(q.toLowerCase());
+  const filter: Record<string, unknown> = {
+    deletedAt: null,
+    status: 'active',
+    $or: [
+      { username: { $regex: `^${safe}`, $options: 'i' } },
+      { displayName: { $regex: safe, $options: 'i' } },
+    ],
+  };
+
+  // Respecte le flag searchable (priv defaut true, on accepte aussi absent)
+  filter['prefs.privacy.searchable'] = { $ne: false };
+
+  // Exclut les users impliques dans un block avec le viewer (dans un sens ou l'autre)
+  if (viewer) {
+    const blocks = await BlockModel.find({
+      $or: [{ blockerId: viewer._id }, { blockedId: viewer._id }],
+    }).select('blockerId blockedId');
+    const excludeIds = new Set<string>();
+    for (const b of blocks) {
+      excludeIds.add(b.blockerId.equals(viewer._id) ? b.blockedId.toString() : b.blockerId.toString());
+    }
+    excludeIds.add(viewer._id.toString()); // ne pas se retourner soi-meme
+    if (excludeIds.size > 0) {
+      filter._id = { $nin: Array.from(excludeIds) };
+    }
+  }
+
+  const users = await UserModel.find(filter)
+    .select('username displayName avatarUrl verified')
+    .limit(limit);
+
+  return users.map((u) => ({
+    id: String(u._id),
+    username: u.username,
+    displayName: u.displayName,
+    avatarUrl: u.avatarUrl,
+    verified: u.verified ?? false,
+  }));
 }
 
 // --- Helpers exposes au tasting.service pour stats denormalisees ---
