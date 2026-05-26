@@ -9,7 +9,7 @@ export function requireRole(...roles: UserRole[]): RequestHandler {
       next(AppError.unauthorized());
       return;
     }
-    if (!roles.includes(req.user.role as UserRole)) {
+    if (!roles.includes(req.user.role)) {
       next(AppError.forbidden('Privileges insuffisants'));
       return;
     }
