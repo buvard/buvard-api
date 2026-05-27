@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>Buvard API</title>
+    <script src="/landing.js" defer></script>
     <style>
       *,
       *::before,
@@ -132,7 +133,7 @@
       }
     </style>
   </head>
-  <body>
+  <body data-boot="{{BOOT_MS}}" data-now="{{NOW_MS}}">
     <div class="container">
       <div class="header">
         <h1>Buvard API</h1>
@@ -146,10 +147,10 @@
           <span class="key">version</span><span class="value">{{VERSION}}</span>
         </div>
         <div class="row">
-          <span class="key">uptime</span><span class="value">{{UPTIME}}</span>
+          <span class="key">uptime</span><span class="value" id="uptime">{{UPTIME}}</span>
         </div>
         <div class="row">
-          <span class="key">heure serveur</span><span class="value">{{TIME}}</span>
+          <span class="key">heure serveur</span><span class="value" id="time">{{TIME}}</span>
         </div>
       </div>
 
