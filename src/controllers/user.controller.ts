@@ -9,6 +9,7 @@ import {
   getMyStats,
   getPrefs,
   getUserByUsername,
+  getViewerRelationship,
   listBlocks,
   listFollowers,
   listFollowing,
@@ -73,6 +74,12 @@ export async function getPublicProfile(req: Request, res: Response): Promise<voi
   if (user.prefs?.privacy?.profilePublic === false) {
     throw AppError.notFound('Utilisateur introuvable');
   }
+
+  // Relation du viewer connecté (anonyme → tout false). Route en attachUserIfAuth.
+  const relationship = req.user
+    ? await getViewerRelationship(req.user._id, user._id)
+    : { isFollowing: false, isBlocked: false };
+
   res.json({
     user: {
       id: String(user._id),
@@ -96,6 +103,8 @@ export async function getPublicProfile(req: Request, res: Response): Promise<voi
         xp: user.gamification?.xp ?? 0,
       },
       joinDate: user.createdAt,
+      isFollowing: relationship.isFollowing,
+      isBlocked: relationship.isBlocked,
     },
   });
 }

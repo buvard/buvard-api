@@ -295,6 +295,20 @@ async function isBlocked(aId: Types.ObjectId, bId: Types.ObjectId): Promise<bool
   return Boolean(found);
 }
 
+// Relation du viewer connecte vis-a-vis d'un profil cible (UI : suivre / bloquer).
+// isBlocked ici est DIRECTIONNEL (viewer -> cible) pour piloter le bouton Bloquer/Debloquer.
+export async function getViewerRelationship(
+  viewerId: Types.ObjectId,
+  targetId: Types.ObjectId,
+): Promise<{ isFollowing: boolean; isBlocked: boolean }> {
+  if (viewerId.equals(targetId)) return { isFollowing: false, isBlocked: false };
+  const [following, blocked] = await Promise.all([
+    FollowModel.exists({ followerId: viewerId, followingId: targetId }),
+    BlockModel.exists({ blockerId: viewerId, blockedId: targetId }),
+  ]);
+  return { isFollowing: Boolean(following), isBlocked: Boolean(blocked) };
+}
+
 export async function followUser(actor: UserDoc, targetUsername: string): Promise<void> {
   const target = await getUserByUsername(targetUsername);
   if (target._id.equals(actor._id)) throw AppError.badRequest('On ne peut pas se suivre soi-meme');

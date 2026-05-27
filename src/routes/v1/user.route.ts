@@ -75,7 +75,7 @@ userRouter.post('/me/cover', requireUser, requireActive, imageUpload.single('fil
 userRouter.delete('/me/cover', requireUser, deleteCover);
 
 // Routes publiques par username
-userRouter.get('/:username', validate(usernameParamSchema, 'params'), getPublicProfile);
+userRouter.get('/:username', attachUserIfAuth, validate(usernameParamSchema, 'params'), getPublicProfile);
 userRouter.get(
   '/:username/tastings',
   validate(usernameParamSchema, 'params'),
