@@ -85,6 +85,7 @@ export async function getPublicProfile(req: Request, res: Response): Promise<voi
       location: user.prefs?.privacy?.showLocation === false ? undefined : user.location,
       favoriteCategories: user.favoriteCategories,
       verified: user.verified,
+      role: user.role,
       stats: {
         tastingsCount: user.stats?.tastingsCount ?? 0,
         followersCount: user.stats?.followersCount ?? 0,
