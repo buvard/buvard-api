@@ -41,7 +41,9 @@ export const listReleasesQuerySchema = z
 export const latestUpdateQuerySchema = z
   .object({
     platform: z.enum(APP_PLATFORMS),
-    currentVersion: semverSchema,
+    // Permissif : l'app native peut envoyer une version non-SemVer (ex: "1.0", "builtin").
+    // Normalisation côté service (non-SemVer → 0.0.0 → reçoit la dernière release).
+    currentVersion: z.string().min(1),
   })
   .strict();
 

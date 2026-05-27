@@ -104,7 +104,10 @@ export async function getLatestUpdateForClient(
   const latest = await AppReleaseModel.findOne({ platform, active: true }).sort({ createdAt: -1 });
   if (!latest) return null;
 
-  if (compareVersions(latest.version, currentVersion) <= 0) return null;
+  // L'app peut envoyer une version non-SemVer (versionName "1.0", "builtin"...) :
+  // on la traite alors comme 0.0.0 pour toujours proposer la dernière release.
+  const safeCurrent = /^\d+\.\d+\.\d+$/.test(currentVersion) ? currentVersion : '0.0.0';
+  if (compareVersions(latest.version, safeCurrent) <= 0) return null;
 
   return {
     version: latest.version,
