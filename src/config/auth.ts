@@ -60,6 +60,19 @@ function createAuth() {
       bearer(),
       capacitor(),
     ],
+
+    advanced: {
+      // Cookies poses sur le parent `.buvard.app` -> partages entre tous les
+      // sous-domaines (`buvard.app`, `api.buvard.app`, `staging.buvard.app`,
+      // `api-staging.buvard.app`). Necessaire pour que le web (front sur
+      // buvard.app / staging.buvard.app) puisse lire le session cookie pose
+      // par l'API. Sans ca, cross-subdomain = cross-site -> SameSite=Lax bloque.
+      // Note : pas d'impact sur le natif (qui passe par Bearer via le plugin).
+      crossSubDomainCookies: {
+        enabled: true,
+        domain: '.buvard.app',
+      },
+    },
   });
 }
 
