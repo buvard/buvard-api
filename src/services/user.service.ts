@@ -1,4 +1,3 @@
-import { clerkClient } from '@clerk/express';
 import type { Types } from 'mongoose';
 import sharp from 'sharp';
 import { AppError } from '../utils/AppError.js';
@@ -40,7 +39,7 @@ function isDuplicateKeyError(err: unknown): boolean {
   return typeof err === 'object' && err !== null && 'code' in err && (err as { code?: unknown }).code === 11000;
 }
 
-// Genere un username unique a partir d'une base proposee par Clerk
+// Genere un username unique a partir d'une base proposee par l'auth provider
 async function ensureUniqueUsername(base: string): Promise<string> {
   const normalized =
     base
@@ -59,14 +58,6 @@ async function ensureUniqueUsername(base: string): Promise<string> {
     }
   }
   return candidate;
-}
-
-interface ClerkUpsertPayload {
-  clerkId: string;
-  username: string | null;
-  emailPrefix: string | null;
-  fullName: string | null;
-  imageUrl: string | null;
 }
 
 // Si l'user a ete soft-delete, on le restaure quand il revient
@@ -88,76 +79,61 @@ async function touchLastSeen(doc: UserDoc): Promise<void> {
 }
 
 interface CreateSeed {
-  clerkId: string;
+  authUserId: string;
   baseUsername: string;
   displayName: string | null;
   avatarUrl: string | null;
 }
 
-// Cree un user en gerant les races (clerkId/username dupliques entre webhook et auth lazy)
+// Cree un user en gerant les races (authUserId/username dupliques entre process concurrents)
 async function createUserSafely(seed: CreateSeed): Promise<UserDoc> {
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const username = await ensureUniqueUsername(seed.baseUsername);
     try {
       return await UserModel.create({
-        clerkId: seed.clerkId,
+        authUserId: seed.authUserId,
         username,
         displayName: seed.displayName || username,
         avatarUrl: seed.avatarUrl || undefined,
       });
     } catch (err) {
       if (!isDuplicateKeyError(err)) throw err;
-      // Dupe sur clerkId: un autre process (webhook ou auth) a deja insere ce user
-      const byClerk = await UserModel.findOne({ clerkId: seed.clerkId });
-      if (byClerk) return reviveIfDeleted(byClerk);
+      // Dupe sur authUserId: un autre process a deja insere ce user
+      const byAuth = await UserModel.findOne({ authUserId: seed.authUserId });
+      if (byAuth) return reviveIfDeleted(byAuth);
       // Sinon dupe sur username: on retry avec un nouveau candidat
     }
   }
   throw AppError.conflict('Impossible de creer le user, conflit persistant');
 }
 
-export async function findOrCreateUserFromClerk(clerkId: string): Promise<UserDoc> {
-  const existing = await UserModel.findOne({ clerkId });
+// Objet user provenant d'une session Better Auth
+export interface AuthUserSeed {
+  id: string;
+  email?: string | null;
+  name?: string | null;
+  image?: string | null;
+}
+
+// Sync paresseuse : a la 1ere requete authentifiee, on cree (ou retrouve) le
+// profil etendu lie a l'user Better Auth.
+export async function findOrCreateUserFromAuth(authUser: AuthUserSeed): Promise<UserDoc> {
+  const existing = await UserModel.findOne({ authUserId: authUser.id });
   if (existing) {
     const revived = await reviveIfDeleted(existing);
     await touchLastSeen(revived);
     return revived;
   }
 
-  const clerkUser = await clerkClient.users.getUser(clerkId);
-  const primaryEmail = clerkUser.emailAddresses[0]?.emailAddress ?? null;
-  const emailPrefix = primaryEmail ? (primaryEmail.split('@')[0] ?? null) : null;
-  const baseUsername = clerkUser.username || emailPrefix || `user_${clerkId.slice(-6)}`;
-  const fullName = [clerkUser.firstName, clerkUser.lastName].filter(Boolean).join(' ') || null;
+  const emailPrefix = authUser.email ? authUser.email.split('@')[0] || null : null;
+  const baseUsername = emailPrefix || `user_${authUser.id.slice(-6)}`;
 
   return createUserSafely({
-    clerkId,
+    authUserId: authUser.id,
     baseUsername,
-    displayName: fullName,
-    avatarUrl: clerkUser.imageUrl || null,
+    displayName: authUser.name || null,
+    avatarUrl: authUser.image || null,
   });
-}
-
-export async function upsertUserFromWebhook(payload: ClerkUpsertPayload): Promise<UserDoc> {
-  const existing = await UserModel.findOne({ clerkId: payload.clerkId });
-  if (existing) {
-    if (payload.fullName) existing.displayName = payload.fullName;
-    if (payload.imageUrl) existing.avatarUrl = payload.imageUrl;
-    if (existing.deletedAt) existing.deletedAt = null;
-    await existing.save();
-    return existing;
-  }
-  const baseUsername = payload.username || payload.emailPrefix || `user_${payload.clerkId.slice(-6)}`;
-  return createUserSafely({
-    clerkId: payload.clerkId,
-    baseUsername,
-    displayName: payload.fullName,
-    avatarUrl: payload.imageUrl,
-  });
-}
-
-export async function softDeleteUserByClerkId(clerkId: string): Promise<void> {
-  await UserModel.updateOne({ clerkId }, { $set: { deletedAt: new Date() } });
 }
 
 export async function softDeleteMe(user: UserDoc): Promise<void> {

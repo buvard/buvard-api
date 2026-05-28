@@ -1,7 +1,7 @@
 import type { ErrorRequestHandler } from 'express';
 import { MongooseError } from 'mongoose';
 import { MulterError } from 'multer';
-import { ZodError } from 'zod';
+import { z, ZodError } from 'zod';
 import { AppError } from '../utils/AppError.js';
 import { logger } from '../config/logger.js';
 
@@ -23,7 +23,7 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
 
   if (err instanceof ZodError) {
     res.status(400).json({
-      error: { code: 'BAD_REQUEST', message: 'Donnees invalides', details: err.format() },
+      error: { code: 'BAD_REQUEST', message: 'Donnees invalides', details: z.treeifyError(err) },
     } satisfies ErrorBody);
     return;
   }

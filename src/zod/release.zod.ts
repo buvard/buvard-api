@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { APP_PLATFORMS } from '../models/AppRelease.js';
 
-export const semverSchema = z.string().regex(/^\d+\.\d+\.\d+$/, 'Format SemVer attendu: X.Y.Z');
+export const semverSchema = z.string().regex(/^\d+\.\d+\.\d+$/, { error: 'Format SemVer attendu: X.Y.Z' });
 
 // Multer/form-data envoie tout en string — `z.coerce.boolean()` ferait `"false" -> true`.
 // On gere explicitement 'true'/'1' vs 'false'/'0'.
@@ -30,7 +30,7 @@ export const updateReleaseSchema = z
     notes: z.string().trim().max(1000).optional(),
   })
   .strict()
-  .refine((v) => Object.keys(v).length > 0, { message: 'Aucun champ a mettre a jour' });
+  .refine((v) => Object.keys(v).length > 0, { error: 'Aucun champ a mettre a jour' });
 
 export const listReleasesQuerySchema = z
   .object({
@@ -48,7 +48,7 @@ export const latestUpdateQuerySchema = z
   .strict();
 
 export const releaseIdParamSchema = z.object({
-  id: z.string().regex(/^[a-f\d]{24}$/i, 'id invalide'),
+  id: z.string().regex(/^[a-f\d]{24}$/i, { error: 'id invalide' }),
 });
 
 export type CreateReleaseInput = z.infer<typeof createReleaseSchema>;

@@ -6,44 +6,40 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(4000),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
 
-  MONGODB_URI: z.string().min(1, 'MONGODB_URI requis'),
+  MONGODB_URI: z.string().min(1, { error: 'MONGODB_URI requis' }),
 
   CORS_ORIGINS: z
     .string()
     .default('http://localhost:5173')
     .transform((v) => v.split(',').map((s) => s.trim()).filter(Boolean)),
 
-  CLERK_PUBLISHABLE_KEY: z.string().min(1),
-  CLERK_SECRET_KEY: z.string().min(1),
-  CLERK_WEBHOOK_SECRET: z.string().min(1),
+  // Secret Better Auth pour signer cookies / tokens de session.
+  // Generer avec: openssl rand -hex 32
+  BETTER_AUTH_SECRET: z.string().min(32, { error: 'BETTER_AUTH_SECRET doit faire 32+ chars' }),
 
-  // Bundle identifier de l'app native correspondant a cet environnement.
-  // Utilise par /oauth-bridge pour rebondir vers le scheme custom apres OAuth.
-  // staging -> app.buvard.staging, prod -> app.buvard.
-  APP_BUNDLE_ID: z.string().min(1).default('app.buvard.staging'),
-
-  // OAuth Google (flow BFF natif). Meme Client ID / Secret que celui configure
-  // cote Clerk dashboard SSO connections Google. Cree dans Google Cloud Console
-  // (type "Web application"). Redirect URI a y allowlister : <PUBLIC_API_URL>/oauth/google/callback
+  // OAuth Google (social provider Better Auth). Cree dans Google Cloud Console
+  // (type "Web application"). Redirect URI a allowlister cote Google :
+  //   <PUBLIC_API_URL>/api/auth/callback/google
   GOOGLE_CLIENT_ID: z.string().min(1),
   GOOGLE_CLIENT_SECRET: z.string().min(1),
 
-  // URL publique de l'API (sans slash final). Utilisee comme redirect_uri Google.
+  // URL publique de l'API (sans slash final). Utilisee par Better Auth comme
+  // baseURL pour generer les URLs de callback OAuth.
   // staging -> https://api-staging.buvard.app, prod -> https://api.buvard.app.
-  PUBLIC_API_URL: z.string().url(),
+  PUBLIC_API_URL: z.url(),
 
   // Cloudflare R2 — stockage S3-compatible pour avatars / covers
   R2_ACCOUNT_ID: z.string().min(1),
   R2_ACCESS_KEY_ID: z.string().min(1),
   R2_SECRET_ACCESS_KEY: z.string().min(1),
   R2_BUCKET: z.string().min(1),
-  R2_PUBLIC_URL: z.string().url(),
+  R2_PUBLIC_URL: z.url(),
 });
 
 const parsed = envSchema.safeParse(process.env);
 
 if (!parsed.success) {
-  console.error('Configuration env invalide:', parsed.error.format());
+  console.error('Configuration env invalide:', z.treeifyError(parsed.error));
   process.exit(1);
 }
 

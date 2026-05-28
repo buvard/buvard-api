@@ -3,15 +3,14 @@ import helmet from 'helmet';
 import cors from 'cors';
 import compression from 'compression';
 import { pinoHttp } from 'pino-http';
+import { toNodeHandler } from 'better-auth/node';
 import { env } from './config/env.js';
 import { logger } from './config/logger.js';
 import { APP_VERSION } from './config/version.js';
-import { clerkAuth } from './middlewares/auth.js';
+import { getAuth } from './config/auth.js';
 import { errorHandler } from './middlewares/error.js';
 import { notFoundHandler } from './middlewares/notFound.js';
 import { apiRouter } from './routes/index.js';
-import { webhookRouter } from './routes/webhook.route.js';
-import { oauthBridge, oauthGoogleInit, oauthGoogleCallback } from './controllers/oauth.controller.js';
 import { PUBLIC_DIR, renderLanding } from './views/landing.js';
 
 export function buildApp(): Express {
@@ -30,12 +29,12 @@ export function buildApp(): Express {
     }),
   );
 
-  app.use('/webhooks', webhookRouter);
+  // Routes Better Auth — montees AVANT express.json() car Better Auth lit
+  // le body brut via la Fetch API (Request global).
+  app.all('/api/auth/*splat', toNodeHandler(getAuth().handler));
 
   app.use(express.json({ limit: '1mb' }));
   app.use(express.urlencoded({ extended: true, limit: '1mb' }));
-
-  app.use(clerkAuth);
 
   app.get('/', (_req, res) => {
     res.type('html').send(renderLanding());
@@ -47,17 +46,6 @@ export function buildApp(): Express {
   app.get('/health', (_req, res) => {
     res.json({ status: 'ok', version: APP_VERSION, uptime: process.uptime() });
   });
-
-  // Pont OAuth historique : sert quand on utilisait le flux Clerk natif
-  // (signIn.create + handshake). Garde pour compat staging eventuellement.
-  app.get('/oauth-bridge', oauthBridge);
-
-  // Flow BFF Google OAuth (recommande Clerk pour les apps natives mobiles).
-  // Permet de contourner la limitation cookie isolation WebView <-> Custom Tab.
-  // Init: app -> /oauth/google/init  -> { url } -> Browser.open(url)
-  // Callback: Google -> /oauth/google/callback -> deep link app + ticket
-  app.get('/oauth/google/init', oauthGoogleInit);
-  app.get('/oauth/google/callback', oauthGoogleCallback);
 
   app.use('/api', apiRouter);
 
