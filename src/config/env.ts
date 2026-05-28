@@ -17,6 +17,11 @@ const envSchema = z.object({
   CLERK_SECRET_KEY: z.string().min(1),
   CLERK_WEBHOOK_SECRET: z.string().min(1),
 
+  // Bundle identifier de l'app native correspondant a cet environnement.
+  // Utilise par /oauth-bridge pour rebondir vers le scheme custom apres OAuth.
+  // staging -> app.buvard.staging, prod -> app.buvard.
+  APP_BUNDLE_ID: z.string().min(1).default('app.buvard.staging'),
+
   // Cloudflare R2 — stockage S3-compatible pour avatars / covers
   R2_ACCOUNT_ID: z.string().min(1),
   R2_ACCESS_KEY_ID: z.string().min(1),

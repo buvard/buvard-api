@@ -11,6 +11,7 @@ import { errorHandler } from './middlewares/error.js';
 import { notFoundHandler } from './middlewares/notFound.js';
 import { apiRouter } from './routes/index.js';
 import { webhookRouter } from './routes/webhook.route.js';
+import { oauthBridge } from './controllers/oauth.controller.js';
 import { PUBLIC_DIR, renderLanding } from './views/landing.js';
 
 export function buildApp(): Express {
@@ -46,6 +47,10 @@ export function buildApp(): Express {
   app.get('/health', (_req, res) => {
     res.json({ status: 'ok', version: APP_VERSION, uptime: process.uptime() });
   });
+
+  // Pont OAuth : Clerk impose redirect_url https, on rebondit ici vers le
+  // scheme natif (`app.buvard[.staging]://oauth-callback`) intercepte cote app.
+  app.get('/oauth-bridge', oauthBridge);
 
   app.use('/api', apiRouter);
 
