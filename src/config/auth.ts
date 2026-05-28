@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { betterAuth } from 'better-auth';
+import { bearer } from 'better-auth/plugins';
 import { mongodbAdapter } from '@better-auth/mongo-adapter';
 import { capacitor } from 'better-auth-capacitor';
 import { env } from './env.js';
@@ -51,7 +52,14 @@ function createAuth() {
       },
     },
 
-    plugins: [capacitor()],
+    plugins: [
+      // `bearer()` autorise l'auth via Authorization Bearer (header) au lieu
+      // de cookies. Indispensable pour le natif Capacitor : la WebView ne peut
+      // pas envoyer les cookies cross-origin du domaine API, donc le plugin
+      // capacitor() cote front passe le session_token en Bearer.
+      bearer(),
+      capacitor(),
+    ],
   });
 }
 
