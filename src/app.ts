@@ -11,7 +11,7 @@ import { errorHandler } from './middlewares/error.js';
 import { notFoundHandler } from './middlewares/notFound.js';
 import { apiRouter } from './routes/index.js';
 import { webhookRouter } from './routes/webhook.route.js';
-import { oauthBridge } from './controllers/oauth.controller.js';
+import { oauthBridge, oauthGoogleInit, oauthGoogleCallback } from './controllers/oauth.controller.js';
 import { PUBLIC_DIR, renderLanding } from './views/landing.js';
 
 export function buildApp(): Express {
@@ -48,9 +48,16 @@ export function buildApp(): Express {
     res.json({ status: 'ok', version: APP_VERSION, uptime: process.uptime() });
   });
 
-  // Pont OAuth : Clerk impose redirect_url https, on rebondit ici vers le
-  // scheme natif (`app.buvard[.staging]://oauth-callback`) intercepte cote app.
+  // Pont OAuth historique : sert quand on utilisait le flux Clerk natif
+  // (signIn.create + handshake). Garde pour compat staging eventuellement.
   app.get('/oauth-bridge', oauthBridge);
+
+  // Flow BFF Google OAuth (recommande Clerk pour les apps natives mobiles).
+  // Permet de contourner la limitation cookie isolation WebView <-> Custom Tab.
+  // Init: app -> /oauth/google/init  -> { url } -> Browser.open(url)
+  // Callback: Google -> /oauth/google/callback -> deep link app + ticket
+  app.get('/oauth/google/init', oauthGoogleInit);
+  app.get('/oauth/google/callback', oauthGoogleCallback);
 
   app.use('/api', apiRouter);
 

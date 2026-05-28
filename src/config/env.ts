@@ -22,6 +22,16 @@ const envSchema = z.object({
   // staging -> app.buvard.staging, prod -> app.buvard.
   APP_BUNDLE_ID: z.string().min(1).default('app.buvard.staging'),
 
+  // OAuth Google (flow BFF natif). Meme Client ID / Secret que celui configure
+  // cote Clerk dashboard SSO connections Google. Cree dans Google Cloud Console
+  // (type "Web application"). Redirect URI a y allowlister : <PUBLIC_API_URL>/oauth/google/callback
+  GOOGLE_CLIENT_ID: z.string().min(1),
+  GOOGLE_CLIENT_SECRET: z.string().min(1),
+
+  // URL publique de l'API (sans slash final). Utilisee comme redirect_uri Google.
+  // staging -> https://api-staging.buvard.app, prod -> https://api.buvard.app.
+  PUBLIC_API_URL: z.string().url(),
+
   // Cloudflare R2 — stockage S3-compatible pour avatars / covers
   R2_ACCOUNT_ID: z.string().min(1),
   R2_ACCESS_KEY_ID: z.string().min(1),
