@@ -30,7 +30,10 @@ const tastingsByCategoryFields = TASTING_TYPES.reduce<Record<string, { type: Num
 
 const userSchema = new Schema(
   {
-    clerkId: { type: String, required: true, unique: true, index: true },
+    // Reference vers l'id de l'user gere par Better Auth (table `user`).
+    // Notre UserModel represente le profil etendu (username, prefs, etc.)
+    // lie a l'user d'auth — sync paresseusement a la 1ere requete authentifiee.
+    authUserId: { type: String, required: true, unique: true, index: true },
     username: {
       type: String,
       required: true,

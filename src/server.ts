@@ -1,10 +1,13 @@
 import { env } from './config/env.js';
 import { logger } from './config/logger.js';
 import { connectDb, disconnectDb } from './config/db.js';
+import { initAuth } from './config/auth.js';
 import { buildApp } from './app.js';
 
 async function main(): Promise<void> {
   await connectDb();
+  // Better Auth depend du client mongo connecte, on l'init apres connectDb()
+  initAuth();
 
   const app = buildApp();
   const server = app.listen(env.PORT, () => {

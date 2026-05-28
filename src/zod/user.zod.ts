@@ -13,7 +13,7 @@ export const usernameSchema = z
   .toLowerCase()
   .min(3)
   .max(32)
-  .regex(/^[a-z0-9_.-]+$/, 'Caracteres autorises: a-z 0-9 _ . -');
+  .regex(/^[a-z0-9_.-]+$/, { error: 'Caracteres autorises: a-z 0-9 _ . -' });
 
 const locationSchema = z
   .object({
@@ -30,14 +30,14 @@ export const updateMeSchema = z
     username: usernameSchema.optional(),
     displayName: z.string().trim().max(60).optional(),
     bio: z.string().trim().max(280).optional(),
-    avatarUrl: z.string().url().optional(),
-    coverUrl: z.string().url().optional(),
+    avatarUrl: z.url().optional(),
+    coverUrl: z.url().optional(),
     location: locationSchema.optional(),
     birthYear: z.number().int().min(1900).max(CURRENT_YEAR - MIN_AGE).optional(),
     favoriteCategories: z.array(z.enum(TASTING_TYPES)).max(TASTING_TYPES.length).optional(),
   })
   .strict()
-  .refine((v) => Object.keys(v).length > 0, { message: 'Aucun champ a mettre a jour' });
+  .refine((v) => Object.keys(v).length > 0, { error: 'Aucun champ a mettre a jour' });
 
 const notificationsPrefsSchema = z
   .object({
@@ -69,7 +69,7 @@ export const updatePrefsSchema = z
     privacy: privacyPrefsSchema.optional(),
   })
   .strict()
-  .refine((v) => Object.keys(v).length > 0, { message: 'Aucun champ a mettre a jour' });
+  .refine((v) => Object.keys(v).length > 0, { error: 'Aucun champ a mettre a jour' });
 
 export const usernameParamSchema = z.object({ username: usernameSchema });
 
