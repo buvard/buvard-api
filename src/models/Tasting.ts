@@ -30,8 +30,28 @@ const tastingSchema = new Schema(
     rating: { type: Number, required: true, min: 0.5, max: 5 },
     aromas: { type: [String], default: [] },
     notes: { type: String, trim: true, maxlength: 2000 },
-    photoUrl: { type: String, trim: true },
-    visibility: { type: String, enum: VISIBILITIES, default: 'private', index: true },
+    // Lieu de degustation. Saisi via autocomplete Google Places cote front.
+    // - name est obligatoire si l'objet existe (sinon le tasting n'a pas de place du tout)
+    // - lat/lng/placeId sont optionnels mais en general renseignes par l'autocomplete.
+    //   placeId permet de relier plusieurs tastings au meme etablissement.
+    place: {
+      type: {
+        name: { type: String, required: true, trim: true, maxlength: 200 },
+        lat: { type: Number, min: -90, max: 90 },
+        lng: { type: Number, min: -180, max: 180 },
+        placeId: { type: String, trim: true, maxlength: 200 },
+      },
+      _id: false,
+      default: undefined,
+    },
+    // Photos d'une degustation — jusqu'a MAX_PHOTOS images (cf service).
+    // L'ordre du tableau = ordre d'affichage (carousel). La 1ere photo sert
+    // de cover dans les listings denses si besoin.
+    photoUrls: { type: [String], default: [] },
+    visibility: { type: String, enum: VISIBILITIES, default: 'public', index: true },
+    // Compteur denormalize des likes — incrementer/decrementer atomiquement
+    // dans le service like. Eviter countDocuments() qui est couteux.
+    likesCount: { type: Number, default: 0, min: 0 },
     deletedAt: { type: Date, default: null },
   },
   {

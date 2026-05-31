@@ -116,6 +116,11 @@ const userSchema = new Schema(
   {
     timestamps: true,
     versionKey: false,
+    // Nom de collection explicite : evite la confusion avec la collection `user`
+    // (singulier) creee par Better Auth qui gere l'auth pure. Notre `userProfiles`
+    // stocke le profil metier etendu (username, prefs, stats, gamification, etc.)
+    // lie a l'auth via le champ `authUserId`.
+    collection: 'userProfiles',
     toJSON: {
       transform(_doc, ret: Record<string, unknown>) {
         ret.id = String(ret._id);
