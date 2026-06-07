@@ -31,15 +31,17 @@ function createAuth() {
       ...env.CORS_ORIGINS,
       'app.buvard://',
       'app.buvard.staging://',
+      'app.buvard.local://',
     ],
 
     database: mongodbAdapter(db, { client }),
 
     // Schemes deep link des apps natives Capacitor — autorise les callbackURL
-    // OAuth de la forme `app.buvard[.staging]://...` que le plugin capacitorClient
-    // genere automatiquement pour le retour OAuth en natif. Sans ca, Better Auth
-    // rejette avec INVALID_CALLBACK_URL au moment du POST /sign-in/social.
-    // (Le meme serveur sert les 2 envs si jamais, donc on liste les 2 schemes.)
+    // OAuth de la forme `app.buvard[.staging|.local]://...` que le plugin
+    // capacitorClient genere automatiquement pour le retour OAuth en natif.
+    // Sans ca, Better Auth rejette avec INVALID_CALLBACK_URL au moment du
+    // POST /sign-in/social. (Le meme serveur peut servir plusieurs envs, donc
+    // on liste les 3 schemes.)
 
     emailAndPassword: {
       enabled: true,

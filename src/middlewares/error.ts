@@ -1,5 +1,5 @@
 import type { ErrorRequestHandler } from 'express';
-import { MongooseError } from 'mongoose';
+import mongoose, { MongooseError } from 'mongoose';
 import { MulterError } from 'multer';
 import { z, ZodError } from 'zod';
 import { AppError } from '../utils/AppError.js';
@@ -28,9 +28,19 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
     return;
   }
 
-  if (err instanceof MongooseError) {
+  // Discrimine les MongooseError selon leur type :
+  // - ValidationError / CastError : erreur de saisie → 400
+  // - autres (DocumentNotFoundError, OverwriteModelError, etc.) : bug serveur → 500
+  if (err instanceof mongoose.Error.ValidationError || err instanceof mongoose.Error.CastError) {
     res.status(400).json({
       error: { code: 'BAD_REQUEST', message: err.message },
+    } satisfies ErrorBody);
+    return;
+  }
+  if (err instanceof MongooseError) {
+    logger.error({ err }, 'erreur mongoose non geree (500)');
+    res.status(500).json({
+      error: { code: 'INTERNAL', message: 'Erreur serveur' },
     } satisfies ErrorBody);
     return;
   }
