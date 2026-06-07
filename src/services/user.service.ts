@@ -820,7 +820,7 @@ export async function awardTastingXp(
   const milestoneFlags: Record<string, boolean> = {};
   const already = user.gamification?.bonusesGranted ?? { streak7: false, streak30: false, streak100: false };
   for (const threshold of [7, 30, 100] as const) {
-    const flagKey = `streak${threshold}` as 'streak7' | 'streak30' | 'streak100';
+    const flagKey = `streak${threshold}` as const;
     if (
       !already[flagKey] &&
       prevStreak < threshold &&

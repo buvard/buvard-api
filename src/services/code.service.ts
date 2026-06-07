@@ -59,7 +59,7 @@ export async function redeemCode(user: UserDoc, codeKey: string): Promise<{
     code: code.code,
     // Hint pour le front : si feature deja active, le user le sait
     ...(alreadyActive ? { alreadyActive: true } : {}),
-  } as { type: RedemptionType; code: string };
+  };
 }
 
 // Cree un code admin. Si `code` non fourni, genere un code random.

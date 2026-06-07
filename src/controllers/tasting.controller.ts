@@ -39,9 +39,9 @@ function serialize(t: { toJSON: () => unknown }, isLikedByMe = false): unknown {
   const json = t.toJSON() as Record<string, unknown>;
   const raw = json.userId;
   if (raw && typeof raw === 'object' && 'username' in raw) {
-    const u = raw as { _id?: unknown; id?: string; username: string; displayName?: string; avatarUrl?: string };
+    const u = raw as { _id?: Types.ObjectId; id?: string; username: string; displayName?: string; avatarUrl?: string };
     json.author = {
-      id: u.id ?? (u._id !== undefined ? String(u._id) : undefined),
+      id: u.id ?? u._id?.toString(),
       username: u.username,
       displayName: u.displayName,
       avatarUrl: u.avatarUrl,
@@ -196,8 +196,10 @@ export async function deleteTastingLike(req: Request, res: Response): Promise<vo
 // GET /:id/likes — liste paginee des users qui ont like
 export async function listLikers(req: Request, res: Response): Promise<void> {
   const { id } = req.params as { id: string };
-  const page = parseInt(String(req.query.page ?? '1'), 10) || 1;
-  const limit = Math.min(parseInt(String(req.query.limit ?? '30'), 10) || 30, 100);
+  const pageRaw = typeof req.query.page === 'string' ? req.query.page : '1';
+  const limitRaw = typeof req.query.limit === 'string' ? req.query.limit : '30';
+  const page = parseInt(pageRaw, 10) || 1;
+  const limit = Math.min(parseInt(limitRaw, 10) || 30, 100);
   const result = await listTastingLikers(id, req.user ?? null, page, limit);
   res.json(result);
 }

@@ -1,4 +1,4 @@
-import { Types } from 'mongoose';
+import type { Types } from 'mongoose';
 import { AppError } from '../utils/AppError.js';
 import { LikeModel } from '../models/Like.js';
 import { TastingModel } from '../models/Tasting.js';
