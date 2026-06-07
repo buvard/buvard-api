@@ -29,11 +29,13 @@ import { listMentionsForUser } from '../services/mentions.service.js';
 import type {
   ListFollowsQuery,
   MentionsQuery,
+  RedeemCodeInput,
   SearchUsersQuery,
   SetDisplayGradeInput,
   UpdateMeInput,
   UpdatePrefsInput,
 } from '../zod/user.zod.js';
+import { redeemCode } from '../services/code.service.js';
 
 export async function getMe(req: Request, res: Response): Promise<void> {
   if (!req.user) throw AppError.unauthorized();
@@ -53,6 +55,16 @@ export async function patchMyGrade(req: Request, res: Response): Promise<void> {
   const { key } = req.body as SetDisplayGradeInput;
   const updated = await setDisplayGrade(req.user, key);
   res.json({ user: updated.toJSON() });
+}
+
+// POST /me/redeem-code { code }
+// Active une feature (pochtron / vip / earlyAccess) en consommant un code.
+// req.user est mute en place dans le service — le toJSON reflete les flags.
+export async function postRedeemCode(req: Request, res: Response): Promise<void> {
+  if (!req.user) throw AppError.unauthorized();
+  const { code } = req.body as RedeemCodeInput;
+  const result = await redeemCode(req.user, code);
+  res.json({ ...result, user: req.user.toJSON() });
 }
 
 export async function deleteMe(req: Request, res: Response): Promise<void> {

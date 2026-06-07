@@ -129,3 +129,29 @@ export type MentionsQuery = z.infer<typeof mentionsQuerySchema>;
 export type AdminAdjustXpInput = z.infer<typeof adminAdjustXpSchema>;
 export type AdminSetXpInput = z.infer<typeof adminSetXpSchema>;
 export type SetDisplayGradeInput = z.infer<typeof setDisplayGradeSchema>;
+
+// --- Redemption codes ---
+
+export const redeemCodeSchema = z.object({
+  code: z.string().min(1).max(64),
+});
+
+// Mirror back/RedemptionCode.ts. Un seul type pour l'instant.
+const REDEMPTION_TYPES = ['pochtron'] as const;
+
+export const createCodeSchema = z.object({
+  // Optionnel : si non fourni, le back genere un code random
+  code: z.string().min(3).max(64).optional(),
+  type: z.enum(REDEMPTION_TYPES),
+  // null ou nombre. null = illimite.
+  maxUses: z.number().int().min(1).max(1_000_000).nullable().default(null),
+  // ISO date string ou null
+  expiresAt: z.iso.datetime().nullable().default(null),
+});
+
+export const codeIdParamSchema = z.object({
+  id: z.string().regex(objectIdRegex, { error: 'id invalide' }),
+});
+
+export type RedeemCodeInput = z.infer<typeof redeemCodeSchema>;
+export type CreateCodeInput = z.infer<typeof createCodeSchema>;

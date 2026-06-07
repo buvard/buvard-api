@@ -6,6 +6,7 @@ import { validate } from '../../middlewares/validate.js';
 import {
   listFollowsQuerySchema,
   mentionsQuerySchema,
+  redeemCodeSchema,
   searchUsersQuerySchema,
   setDisplayGradeSchema,
   updateMeSchema,
@@ -31,6 +32,7 @@ import {
   patchMe,
   patchMyGrade,
   patchMyPrefs,
+  postRedeemCode,
   postAcceptPrivacy,
   postAcceptTerms,
   postAvatar,
@@ -47,6 +49,7 @@ export const userRouter: Router = Router();
 userRouter.get('/me', requireUser, getMe);
 userRouter.patch('/me', requireUser, requireActive, validate(updateMeSchema), patchMe);
 userRouter.patch('/me/grade', requireUser, requireActive, validate(setDisplayGradeSchema), patchMyGrade);
+userRouter.post('/me/redeem-code', requireUser, requireActive, validate(redeemCodeSchema), postRedeemCode);
 userRouter.delete('/me', requireUser, deleteMe);
 userRouter.get('/me/prefs', requireUser, getMyPrefs);
 userRouter.patch('/me/prefs', requireUser, validate(updatePrefsSchema), patchMyPrefs);

@@ -68,6 +68,14 @@ const userSchema = new Schema(
     lastSeenAt: { type: Date, default: Date.now },
     onboardingCompletedAt: { type: Date, default: null },
 
+    // Features debloquees via codes (RedemptionCode). Pour l'instant un seul
+    // flag : pochtron = bonus testeur (acces aux features experimentales,
+    // badge VIP, etc. — tout regroupe sous ce nom). Le sous-doc reste
+    // extensible si on veut splitter en plusieurs flags plus tard.
+    features: {
+      pochtron: { type: Boolean, default: false },
+    },
+
     // Gamification
     gamification: {
       xp: { type: Number, default: 0, index: true },
