@@ -7,6 +7,7 @@ import {
   listFollowsQuerySchema,
   mentionsQuerySchema,
   searchUsersQuerySchema,
+  setDisplayGradeSchema,
   updateMeSchema,
   updatePrefsSchema,
   usernameParamSchema,
@@ -28,6 +29,7 @@ import {
   getSearchUsers,
   getStats,
   patchMe,
+  patchMyGrade,
   patchMyPrefs,
   postAcceptPrivacy,
   postAcceptTerms,
@@ -44,6 +46,7 @@ export const userRouter: Router = Router();
 // /me et ses sous-routes — ordre important: declarer avant /:username
 userRouter.get('/me', requireUser, getMe);
 userRouter.patch('/me', requireUser, requireActive, validate(updateMeSchema), patchMe);
+userRouter.patch('/me/grade', requireUser, requireActive, validate(setDisplayGradeSchema), patchMyGrade);
 userRouter.delete('/me', requireUser, deleteMe);
 userRouter.get('/me/prefs', requireUser, getMyPrefs);
 userRouter.patch('/me/prefs', requireUser, validate(updatePrefsSchema), patchMyPrefs);

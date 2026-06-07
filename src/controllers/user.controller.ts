@@ -18,6 +18,7 @@ import {
   searchUsers,
   setAvatar,
   setCover,
+  setDisplayGrade,
   softDeleteMe,
   unblockUser,
   unfollowUser,
@@ -29,6 +30,7 @@ import type {
   ListFollowsQuery,
   MentionsQuery,
   SearchUsersQuery,
+  SetDisplayGradeInput,
   UpdateMeInput,
   UpdatePrefsInput,
 } from '../zod/user.zod.js';
@@ -41,6 +43,15 @@ export async function getMe(req: Request, res: Response): Promise<void> {
 export async function patchMe(req: Request, res: Response): Promise<void> {
   if (!req.user) throw AppError.unauthorized();
   const updated = await updateMe(req.user, req.body as UpdateMeInput);
+  res.json({ user: updated.toJSON() });
+}
+
+// PATCH /me/grade { key: string | null }
+// Selectionne le grade d'affichage (parmi ceux deja debloques) ou reset auto.
+export async function patchMyGrade(req: Request, res: Response): Promise<void> {
+  if (!req.user) throw AppError.unauthorized();
+  const { key } = req.body as SetDisplayGradeInput;
+  const updated = await setDisplayGrade(req.user, key);
   res.json({ user: updated.toJSON() });
 }
 
@@ -97,10 +108,14 @@ export async function getPublicProfile(req: Request, res: Response): Promise<voi
         tastingsCount: user.stats?.tastingsCount ?? 0,
         followersCount: user.stats?.followersCount ?? 0,
         followingCount: user.stats?.followingCount ?? 0,
+        tastingsByCategory: user.stats?.tastingsByCategory ?? {},
       },
       gamification: {
         level: user.gamification?.level ?? 1,
         xp: user.gamification?.xp ?? 0,
+        grade: user.gamification?.grade ?? 'curious',
+        // Override visuel choisi par le user (null = on utilise grade auto).
+        displayGrade: user.gamification?.displayGrade ?? null,
       },
       joinDate: user.createdAt,
       isFollowing: relationship.isFollowing,

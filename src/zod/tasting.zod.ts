@@ -55,7 +55,35 @@ export const listTastingsQuerySchema = z.object({
   type: z.enum(TASTING_TYPES).optional(),
 });
 
+// Bounding box "swLat,swLng,neLat,neLng" — coords en latitude/longitude WGS84.
+// On valide ici plutot que dans le service pour ne pas polluer la logique metier.
+const bboxRegex = /^-?\d+(\.\d+)?,-?\d+(\.\d+)?,-?\d+(\.\d+)?,-?\d+(\.\d+)?$/;
+
+export const listDiscoverPlacesQuerySchema = listTastingsQuerySchema.extend({
+  bbox: z
+    .string()
+    .regex(bboxRegex, 'Format attendu : swLat,swLng,neLat,neLng')
+    .optional()
+    .transform((raw) => {
+      if (!raw) return undefined;
+      const [swLat, swLng, neLat, neLng] = raw.split(',').map(Number);
+      return { swLat, swLng, neLat, neLng };
+    })
+    .pipe(
+      z
+        .object({
+          swLat: z.number().min(-90).max(90),
+          swLng: z.number().min(-180).max(180),
+          neLat: z.number().min(-90).max(90),
+          neLng: z.number().min(-180).max(180),
+        })
+        .refine((b) => b.swLat <= b.neLat, 'swLat doit être <= neLat')
+        .optional(),
+    ),
+});
+
 export type CreateTastingInput = z.infer<typeof createTastingSchema>;
 export type UpdateTastingInput = z.infer<typeof updateTastingSchema>;
 export type ListTastingsQuery = z.infer<typeof listTastingsQuerySchema>;
+export type ListDiscoverPlacesQuery = z.infer<typeof listDiscoverPlacesQuerySchema>;
 export type ReorderPhotosInput = z.infer<typeof reorderPhotosSchema>;

@@ -4,6 +4,7 @@ import { LikeModel } from '../models/Like.js';
 import { TastingModel } from '../models/Tasting.js';
 import { BlockModel } from '../models/Block.js';
 import type { UserDoc } from '../models/User.js';
+import { grantXp, XP_PER_LIKE_RECEIVED } from './user.service.js';
 
 function isDuplicateKeyError(err: unknown): boolean {
   return typeof err === 'object' && err !== null && 'code' in err && (err as { code?: unknown }).code === 11000;
@@ -33,7 +34,7 @@ async function assertCanLike(userId: Types.ObjectId, tastingId: string): Promise
 
 // Like idempotent. Retourne { liked: true, likesCount } meme si deja like.
 export async function likeTasting(user: UserDoc, tastingId: string): Promise<{ liked: true; likesCount: number }> {
-  const { tastingObjectId } = await assertCanLike(user._id, tastingId);
+  const { tastingObjectId, authorId } = await assertCanLike(user._id, tastingId);
 
   try {
     await LikeModel.create({ userId: user._id, tastingId: tastingObjectId });
@@ -44,6 +45,10 @@ export async function likeTasting(user: UserDoc, tastingId: string): Promise<{ l
       { $inc: { likesCount: 1 } },
       { new: true, projection: { likesCount: 1 } },
     );
+    // Bonus XP au proprietaire du tasting (pas d'auto-like).
+    if (!authorId.equals(user._id)) {
+      await grantXp(authorId, XP_PER_LIKE_RECEIVED);
+    }
     return { liked: true, likesCount: updated?.likesCount ?? 0 };
   } catch (err) {
     if (isDuplicateKeyError(err)) {

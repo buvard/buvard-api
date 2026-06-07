@@ -5,6 +5,7 @@ import { imageUpload } from '../../middlewares/upload.js';
 import { validate } from '../../middlewares/validate.js';
 import {
   createTastingSchema,
+  listDiscoverPlacesQuerySchema,
   listTastingsQuerySchema,
   reorderPhotosSchema,
   tastingIdParamSchema,
@@ -17,6 +18,7 @@ import {
   deleteTastingPhoto,
   getOne,
   listDiscover,
+  listDiscoverPlacesHandler,
   listFeed,
   listLikers,
   listMine,
@@ -29,9 +31,18 @@ import {
 
 export const tastingRouter: Router = Router();
 
-// /feed et /discover doivent etre declares AVANT /:id pour ne pas etre captes comme un id.
+// /feed, /discover et /discover/places doivent etre declares AVANT /:id
+// pour ne pas etre captes comme un id.
 tastingRouter.get('/feed', requireUser, validate(listTastingsQuerySchema, 'query'), listFeed);
 tastingRouter.get('/discover', attachUserIfAuth, validate(listTastingsQuerySchema, 'query'), listDiscover);
+// Aggregation des lieux a partir des degustations publiques (onglet "Decouvrir"
+// sur la carte). Auth obligatoire.
+tastingRouter.get(
+  '/discover/places',
+  requireUser,
+  validate(listDiscoverPlacesQuerySchema, 'query'),
+  listDiscoverPlacesHandler,
+);
 
 tastingRouter.post('/', requireUser, validate(createTastingSchema), postTasting);
 tastingRouter.get('/', requireUser, validate(listTastingsQuerySchema, 'query'), listMine);

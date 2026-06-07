@@ -70,6 +70,21 @@ const tastingSchema = new Schema(
 tastingSchema.index({ userId: 1, createdAt: -1 });
 tastingSchema.index({ visibility: 1, createdAt: -1 });
 
+// Index partiel pour /v1/tastings/discover/places : ne contient que les
+// degustations publiques non supprimees avec coords valides. Tres compact
+// et exactement ce que le $match initial filtre.
+tastingSchema.index(
+  { visibility: 1, 'place.lat': 1, 'place.lng': 1, createdAt: -1 },
+  {
+    partialFilterExpression: {
+      visibility: 'public',
+      deletedAt: null,
+      'place.lat': { $exists: true },
+    },
+    name: 'discover_places_idx',
+  },
+);
+
 export type Tasting = InferSchemaType<typeof tastingSchema> & { userId: Types.ObjectId };
 export type TastingDoc = HydratedDocument<Tasting>;
 export const TastingModel = model<Tasting>('Tasting', tastingSchema);

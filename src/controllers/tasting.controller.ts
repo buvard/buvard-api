@@ -13,6 +13,7 @@ import {
   createTasting,
   deleteTasting,
   getTastingForViewer,
+  listDiscoverPlaces,
   listDiscoverTastings,
   listFeedTastings,
   listMyTastings,
@@ -25,6 +26,7 @@ import {
 import type { TastingDoc } from '../models/Tasting.js';
 import type {
   CreateTastingInput,
+  ListDiscoverPlacesQuery,
   ListTastingsQuery,
   ReorderPhotosInput,
   UpdateTastingInput,
@@ -101,6 +103,11 @@ export async function deleteOne(req: Request, res: Response): Promise<void> {
 export async function listForPublicProfile(req: Request, res: Response): Promise<void> {
   const { username } = req.params as { username: string };
   const user = await getUserByUsername(username);
+  // Coherent avec getPublicProfile : 404 plutot que liste vide pour ne pas
+  // leak l'existence d'un profil prive.
+  if (user.prefs?.privacy?.profilePublic === false) {
+    throw AppError.notFound('Utilisateur introuvable');
+  }
   const result = await listPublicTastingsForUser(
     user._id,
     req.query as unknown as ListTastingsQuery,
@@ -120,6 +127,14 @@ export async function listDiscover(req: Request, res: Response): Promise<void> {
   const result = await listDiscoverTastings(req.user ?? null, req.query as unknown as ListTastingsQuery);
   const data = await serializeListWithLikes(req.user?._id, result.data);
   res.json({ ...result, data });
+}
+
+// GET /v1/tastings/discover/places — lieux agreges (count, avg rating, etc.)
+// Requiert l'auth (cf decision projet : pas d'access anonyme aux donnees aggregees).
+export async function listDiscoverPlacesHandler(req: Request, res: Response): Promise<void> {
+  if (!req.user) throw AppError.unauthorized();
+  const result = await listDiscoverPlaces(req.user, req.query as unknown as ListDiscoverPlacesQuery);
+  res.json(result);
 }
 
 // --- Photos de tasting (array, max 10) ---

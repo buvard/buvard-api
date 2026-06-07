@@ -7,6 +7,7 @@ import { FollowModel } from '../models/Follow.js';
 import { BlockModel } from '../models/Block.js';
 import { deleteObject, extractKeyFromPublicUrl, uploadBuffer } from './storage.service.js';
 import { clearMentions, syncMentions } from './mentions.service.js';
+import { getGradeForLevel, getGradeByKey as getGradeByKeyCached } from './grade.service.js';
 import type { ListFollowsQuery, UpdateMeInput, UpdatePrefsInput } from '../zod/user.zod.js';
 
 // Valeurs par defaut des prefs — utilisees aussi en fallback pour d'eventuels users legacy
@@ -157,8 +158,8 @@ export async function updateMe(user: UserDoc, input: UpdateMeInput): Promise<Use
   if (input.displayName !== undefined) user.displayName = input.displayName;
   const bioChanged = input.bio !== undefined && input.bio !== user.bio;
   if (input.bio !== undefined) user.bio = input.bio;
-  if (input.avatarUrl !== undefined) user.avatarUrl = input.avatarUrl;
-  if (input.coverUrl !== undefined) user.coverUrl = input.coverUrl;
+  // avatarUrl / coverUrl ne sont plus dans le schema de PATCH /me : ils sont
+  // setes uniquement via les endpoints d'upload R2 dedies.
   if (input.birthYear !== undefined) user.birthYear = input.birthYear;
   if (input.favoriteCategories !== undefined) user.favoriteCategories = input.favoriteCategories;
   if (input.location !== undefined) {
@@ -178,6 +179,9 @@ export async function updateMe(user: UserDoc, input: UpdateMeInput): Promise<Use
       text: user.bio,
     });
   }
+  // Apres tout changement de profil, check si on franchit le seuil "profil
+  // complet" (avatar + bio + location.city) pour la 1ere fois.
+  await tryGrantProfileCompleteBonus(user);
   return user;
 }
 
@@ -232,7 +236,13 @@ export async function getMyStats(user: UserDoc) {
     tastingsByCategory: user.stats?.tastingsByCategory ?? {},
     followersCount: user.stats?.followersCount ?? 0,
     followingCount: user.stats?.followingCount ?? 0,
-    gamification: user.gamification ?? { xp: 0, level: 1, streak: { current: 0, longest: 0, lastActiveAt: null } },
+    gamification: user.gamification ?? {
+      xp: 0,
+      level: 1,
+      grade: 'curious',
+      displayGrade: null,
+      streak: { current: 0, longest: 0, lastActiveAt: null },
+    },
     joinDate: user.createdAt,
   };
 }
@@ -243,6 +253,8 @@ export async function completeOnboarding(user: UserDoc): Promise<UserDoc> {
   if (!user.onboardingCompletedAt) {
     user.onboardingCompletedAt = new Date();
     await user.save();
+    // Bonus XP one-shot pour avoir termine l'onboarding.
+    await grantXp(user._id, XP_ONBOARDING);
   }
   return user;
 }
@@ -305,6 +317,20 @@ export async function followUser(actor: UserDoc, targetUsername: string): Promis
     UserModel.updateOne({ _id: actor._id }, { $inc: { 'stats.followingCount': 1 } }),
     UserModel.updateOne({ _id: target._id }, { $inc: { 'stats.followersCount': 1 } }),
   ]);
+
+  // Bonus XP au target : +5 par follower + 20 one-shot pour le 1er. On lit
+  // followersCount *avant* l'increment de la ligne au-dessus (donc 0 si c'est
+  // le 1er), via l'objet target deja en memoire.
+  const prevFollowers = target.stats?.followersCount ?? 0;
+  let bonus = XP_PER_FOLLOWER;
+  if (prevFollowers === 0 && !target.gamification?.bonusesGranted?.firstFollower) {
+    bonus += XP_FIRST_FOLLOWER;
+    await UserModel.updateOne(
+      { _id: target._id },
+      { $set: { 'gamification.bonusesGranted.firstFollower': true } },
+    );
+  }
+  await grantXp(target._id, bonus);
 }
 
 export async function unfollowUser(actor: UserDoc, targetUsername: string): Promise<void> {
@@ -441,7 +467,9 @@ export async function listBlocks(actor: UserDoc, query: ListFollowsQuery): Promi
   ]);
 
   const ids = edges.map((e) => e.blockedId);
-  const users = await UserModel.find({ _id: { $in: ids } }).select('username displayName avatarUrl bio');
+  // Exclut les comptes soft-deletes : ils ne doivent plus apparaitre dans la
+  // liste meme si le block existe encore.
+  const users = await UserModel.find({ _id: { $in: ids }, deletedAt: null }).select('username displayName avatarUrl bio');
   const byId = new Map(users.map((u) => [u._id.toString(), u]));
   const data = ids
     .map((id) => byId.get(id.toString()))
@@ -502,6 +530,8 @@ export async function setAvatar(user: UserDoc, file: Buffer): Promise<UserDoc> {
   await user.save();
   // Best-effort: on supprime l'ancien apres le save reussi
   if (previous && previous !== newUrl) await deleteOldImage(previous);
+  // Setter un avatar peut completer le profil — check du bonus one-shot.
+  await tryGrantProfileCompleteBonus(user);
   return user;
 }
 
@@ -591,6 +621,271 @@ export async function searchUsers(
     avatarUrl: u.avatarUrl,
     verified: u.verified ?? false,
   }));
+}
+
+// --- Gamification : XP + level + streak ---
+
+// Bareme XP. Toutes les valeurs sont centralisees ici pour pouvoir ajuster
+// l'economie en un seul endroit. Si l'on touche une valeur ici, penser a
+// mettre a jour le mirror cote front (src/lib/gamification.ts).
+
+// Publication d'une degustation (base).
+export const XP_PER_TASTING = 10;
+// Bonus qualite a la creation : lieu / notes longues / aromas detailles.
+export const XP_BONUS_PLACE = 5;
+export const XP_BONUS_LONG_NOTES = 5;
+export const XP_BONUS_AROMAS = 3;
+// Limites pour declencher les bonus qualite.
+export const LONG_NOTES_THRESHOLD = 50;
+export const MIN_AROMAS_FOR_BONUS = 3;
+// Photos additionnelles (2eme et + sur une degustation).
+export const XP_PER_PHOTO_ADDITIONAL = 2;
+// Engagement recu (passif).
+export const XP_PER_LIKE_RECEIVED = 1;
+export const XP_PER_FOLLOWER = 5;
+// Milestones one-shot.
+export const XP_FIRST_TASTING = 25;
+export const XP_FIRST_FOLLOWER = 20;
+export const XP_ONBOARDING = 50;
+export const XP_PROFILE_COMPLETE = 25;
+export const STREAK_MILESTONES: Record<number, number> = {
+  7: 50,
+  30: 200,
+  100: 1000,
+};
+
+// --- Grades par tranche de niveau ---
+// Les paliers de progression sont desormais persistes en BDD via le modele
+// Grade et le service grade.service.ts (seed + cache memoire). On reexpose
+// ici juste la constante MAX_LEVEL pour le front (mirror manuel).
+export const MAX_LEVEL = 100;
+
+// Formule level : palier sqrt accelerant naturellement
+//   xp 0-99    -> level 1
+//   xp 100-399 -> level 2
+//   xp 400-899 -> level 3
+//   xp 900-1599 -> level 4
+//   xp 1600+   -> level 5+
+// Avantage : facile a expliquer, recompense la duree sans devenir trivial.
+function computeLevel(xp: number): number {
+  return Math.floor(Math.sqrt(Math.max(0, xp) / 100)) + 1;
+}
+
+// Normalise une date a minuit local pour comparer "meme jour" sans heure.
+// Utilise le fuseau du serveur — acceptable pour MVP, on raffinera avec le
+// timezone user si besoin (le streak peut etre rate de quelques heures
+// quand on chevauche minuit).
+function startOfDay(d: Date): Date {
+  const out = new Date(d);
+  out.setHours(0, 0, 0, 0);
+  return out;
+}
+
+// Calcule l'etat du streak apres une activite "aujourd'hui".
+// - Premiere activite : current = 1
+// - Meme jour qu'une activite precedente : pas de change (deja compte)
+// - Jour J+1 (consecutif) : current += 1
+// - Plus loin (gap) : reset a 1
+function computeNextStreak(
+  currentStreak: number,
+  longestStreak: number,
+  lastActiveAt: Date | null | undefined,
+  now: Date,
+): { current: number; longest: number } {
+  if (!lastActiveAt) return { current: 1, longest: Math.max(1, longestStreak) };
+  const last = startOfDay(new Date(lastActiveAt));
+  const today = startOfDay(now);
+  const diffDays = Math.round((today.getTime() - last.getTime()) / 86_400_000);
+  let nextCurrent: number;
+  if (diffDays <= 0) nextCurrent = Math.max(1, currentStreak);
+  else if (diffDays === 1) nextCurrent = currentStreak + 1;
+  else nextCurrent = 1;
+  return {
+    current: nextCurrent,
+    longest: Math.max(longestStreak, nextCurrent),
+  };
+}
+
+// Helper bas-niveau : ajoute `amount` XP a un user et recalcule son level
+// + son grade (persiste en BDD pour pouvoir querier par grade plus tard).
+// Idempotent : amount <= 0 retourne sans toucher la DB. Reutilisable par tous
+// les hooks XP (like, follow, photo, milestones).
+export async function grantXp(userId: Types.ObjectId, amount: number): Promise<void> {
+  if (amount <= 0) return;
+  const user = await UserModel.findById(userId).select('gamification.xp');
+  if (!user) return;
+  const nextXp = (user.gamification?.xp ?? 0) + amount;
+  const nextLevel = computeLevel(nextXp);
+  await UserModel.updateOne(
+    { _id: userId },
+    {
+      $set: {
+        'gamification.xp': nextXp,
+        'gamification.level': nextLevel,
+        'gamification.grade': getGradeForLevel(nextLevel).key,
+      },
+    },
+  );
+}
+
+// Helper bas-niveau : ajuste l'XP d'un delta arbitraire (positif ou negatif),
+// clamp a 0 minimum. Recalcule level + grade. Reserve aux usages admin et
+// aux corrections de stock (ex: degustation supprimee plus tard).
+export async function adjustXp(userId: Types.ObjectId, delta: number): Promise<{ xp: number; level: number; grade: string }> {
+  const user = await UserModel.findById(userId).select('gamification.xp');
+  if (!user) throw AppError.notFound('Utilisateur introuvable');
+  const currentXp = user.gamification?.xp ?? 0;
+  const nextXp = Math.max(0, currentXp + delta);
+  const nextLevel = computeLevel(nextXp);
+  const nextGrade = getGradeForLevel(nextLevel).key;
+  await UserModel.updateOne(
+    { _id: userId },
+    {
+      $set: {
+        'gamification.xp': nextXp,
+        'gamification.level': nextLevel,
+        'gamification.grade': nextGrade,
+      },
+    },
+  );
+  return { xp: nextXp, level: nextLevel, grade: nextGrade };
+}
+
+// Force la valeur absolue d'XP d'un user. Clamp a 0 minimum. Recalcule
+// level + grade. Reserve aux usages admin (reset / set explicit).
+export async function setXp(userId: Types.ObjectId, xp: number): Promise<{ xp: number; level: number; grade: string }> {
+  const nextXp = Math.max(0, xp);
+  const nextLevel = computeLevel(nextXp);
+  const nextGrade = getGradeForLevel(nextLevel).key;
+  const result = await UserModel.updateOne(
+    { _id: userId },
+    {
+      $set: {
+        'gamification.xp': nextXp,
+        'gamification.level': nextLevel,
+        'gamification.grade': nextGrade,
+      },
+    },
+  );
+  if (result.matchedCount === 0) throw AppError.notFound('Utilisateur introuvable');
+  return { xp: nextXp, level: nextLevel, grade: nextGrade };
+}
+
+// Selectionne le grade d'affichage (override visuel) pour un user. Le user
+// ne peut choisir qu'un grade qu'il a deja debloque (level >= minLevel du
+// grade). Passer null reset a l'affichage auto (grade derive du level).
+export async function setDisplayGrade(user: UserDoc, key: string | null): Promise<UserDoc> {
+  if (key === null) {
+    user.gamification!.displayGrade = null;
+    await user.save();
+    return user;
+  }
+  // Lecture cache memoire (grade.service) : aucun cout BDD.
+  const grade = getGradeByKeyCached(key);
+  if (!grade) throw AppError.badRequest('Grade inconnu');
+  const currentLevel = user.gamification?.level ?? 1;
+  if (currentLevel < grade.minLevel) {
+    throw AppError.forbidden('Grade non debloque');
+  }
+  user.gamification!.displayGrade = key;
+  await user.save();
+  return user;
+}
+
+// Recompense un user pour la publication d'une degustation : +XP, recalc du
+// level, update du streak + bonus de milestones streak (7/30/100 jours).
+// `baseXp` peut etre customise par l'appelant (createTasting calcule bonus
+// qualite et l'envoie ici en parametre).
+// Atomicite : read-then-write (acceptable MVP, un user ne publie pas deux
+// degustations simultanees).
+export async function awardTastingXp(
+  userId: Types.ObjectId,
+  baseXp: number = XP_PER_TASTING,
+): Promise<void> {
+  const user = await UserModel.findById(userId).select('gamification');
+  if (!user) return;
+
+  const now = new Date();
+  const prevStreak = user.gamification?.streak?.current ?? 0;
+  const streak = computeNextStreak(
+    prevStreak,
+    user.gamification?.streak?.longest ?? 0,
+    user.gamification?.streak?.lastActiveAt,
+    now,
+  );
+
+  // Bonus milestones streak : si on franchit 7, 30 ou 100 jours pour la
+  // 1ere fois (verifie via bonusesGranted), on ajoute le bonus correspondant.
+  let milestoneBonus = 0;
+  const milestoneFlags: Record<string, boolean> = {};
+  const already = user.gamification?.bonusesGranted ?? { streak7: false, streak30: false, streak100: false };
+  for (const threshold of [7, 30, 100] as const) {
+    const flagKey = `streak${threshold}` as 'streak7' | 'streak30' | 'streak100';
+    if (
+      !already[flagKey] &&
+      prevStreak < threshold &&
+      streak.current >= threshold
+    ) {
+      milestoneBonus += STREAK_MILESTONES[threshold];
+      milestoneFlags[`gamification.bonusesGranted.${flagKey}`] = true;
+    }
+  }
+
+  const nextXp = (user.gamification?.xp ?? 0) + baseXp + milestoneBonus;
+  const nextLevel = computeLevel(nextXp);
+
+  await UserModel.updateOne(
+    { _id: userId },
+    {
+      $set: {
+        'gamification.xp': nextXp,
+        'gamification.level': nextLevel,
+        'gamification.grade': getGradeForLevel(nextLevel).key,
+        'gamification.streak.current': streak.current,
+        'gamification.streak.longest': streak.longest,
+        'gamification.streak.lastActiveAt': now,
+        ...milestoneFlags,
+      },
+    },
+  );
+}
+
+// Profil "complet" : avatar + bio + location.city renseignes. Award one-shot
+// +XP la 1ere fois que la condition devient vraie. A appeler apres tout
+// changement de profil (updateMe, uploadAvatar).
+export async function tryGrantProfileCompleteBonus(user: UserDoc): Promise<void> {
+  if (user.gamification?.bonusesGranted?.profileComplete) return;
+  const hasAvatar = !!user.avatarUrl;
+  const hasBio = !!user.bio?.trim();
+  const hasLocation = !!user.location?.city?.trim();
+  if (!hasAvatar || !hasBio || !hasLocation) return;
+  await UserModel.updateOne(
+    { _id: user._id },
+    {
+      $set: {
+        'gamification.bonusesGranted.profileComplete': true,
+      },
+      $inc: {
+        // Inc atomique pour eviter une race avec d'autres grants concurrents.
+        // Level sera reconcilie au prochain grantXp / awardTastingXp.
+        'gamification.xp': XP_PROFILE_COMPLETE,
+      },
+    },
+  );
+  // Recalc level + grade apres l'inc.
+  const fresh = await UserModel.findById(user._id).select('gamification.xp');
+  if (fresh) {
+    const lvl = computeLevel(fresh.gamification?.xp ?? 0);
+    await UserModel.updateOne(
+      { _id: user._id },
+      {
+        $set: {
+          'gamification.level': lvl,
+          'gamification.grade': getGradeForLevel(lvl).key,
+        },
+      },
+    );
+  }
 }
 
 // --- Helpers exposes au tasting.service pour stats denormalisees ---

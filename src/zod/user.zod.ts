@@ -25,13 +25,15 @@ const locationSchema = z
 const MIN_AGE = 18;
 const CURRENT_YEAR = new Date().getFullYear();
 
+// avatarUrl et coverUrl sont gerees via des endpoints dedies (POST/DELETE
+// /me/avatar et /me/cover, qui uploadent en R2). On les retire du PATCH /me
+// pour eviter qu'un client puisse setter une URL arbitraire sans passer par
+// l'upload signe.
 export const updateMeSchema = z
   .object({
     username: usernameSchema.optional(),
     displayName: z.string().trim().max(60).optional(),
     bio: z.string().trim().max(280).optional(),
-    avatarUrl: z.url().optional(),
-    coverUrl: z.url().optional(),
     location: locationSchema.optional(),
     birthYear: z.number().int().min(1900).max(CURRENT_YEAR - MIN_AGE).optional(),
     favoriteCategories: z.array(z.enum(TASTING_TYPES)).max(TASTING_TYPES.length).optional(),
@@ -88,8 +90,42 @@ export const mentionsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(50).default(20),
 });
 
+// --- Admin XP + grade ---
+
+const objectIdRegex = /^[a-f\d]{24}$/i;
+export const userIdParamSchema = z.object({
+  id: z.string().regex(objectIdRegex, { error: 'id invalide' }),
+});
+
+// POST /admin/users/:id/xp { delta }
+// Delta peut etre negatif (revoke) ou positif (grant). 0 est rejete pour
+// eviter les requetes inutiles. Borne large pour eviter les abus de batch.
+export const adminAdjustXpSchema = z.object({
+  delta: z
+    .number()
+    .int()
+    .refine((v) => v !== 0, { error: 'delta doit etre non nul' })
+    .min(-1_000_000)
+    .max(1_000_000),
+});
+
+// PUT /admin/users/:id/xp { xp }
+// Set absolu. 0 minimum, max large pour pas brider les tests admin.
+export const adminSetXpSchema = z.object({
+  xp: z.number().int().min(0).max(10_000_000),
+});
+
+// PATCH /v1/users/me/grade { key }
+// key === null reset a l'affichage auto (grade derive du level).
+export const setDisplayGradeSchema = z.object({
+  key: z.string().min(1).max(50).nullable(),
+});
+
 export type UpdateMeInput = z.infer<typeof updateMeSchema>;
 export type UpdatePrefsInput = z.infer<typeof updatePrefsSchema>;
 export type ListFollowsQuery = z.infer<typeof listFollowsQuerySchema>;
 export type SearchUsersQuery = z.infer<typeof searchUsersQuerySchema>;
 export type MentionsQuery = z.infer<typeof mentionsQuerySchema>;
+export type AdminAdjustXpInput = z.infer<typeof adminAdjustXpSchema>;
+export type AdminSetXpInput = z.infer<typeof adminSetXpSchema>;
+export type SetDisplayGradeInput = z.infer<typeof setDisplayGradeSchema>;

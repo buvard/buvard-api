@@ -1,14 +1,32 @@
 import type { Types } from 'mongoose';
 import sharp from 'sharp';
 import { AppError } from '../utils/AppError.js';
-import { TastingModel, type TastingDoc } from '../models/Tasting.js';
+import { TastingModel, type TastingDoc, type TastingType } from '../models/Tasting.js';
 import type { UserDoc } from '../models/User.js';
 import { BlockModel } from '../models/Block.js';
 import { FollowModel } from '../models/Follow.js';
-import { decrementTastingStats, incrementTastingStats } from './user.service.js';
+import {
+  awardTastingXp,
+  decrementTastingStats,
+  grantXp,
+  incrementTastingStats,
+  LONG_NOTES_THRESHOLD,
+  MIN_AROMAS_FOR_BONUS,
+  XP_BONUS_AROMAS,
+  XP_BONUS_LONG_NOTES,
+  XP_BONUS_PLACE,
+  XP_FIRST_TASTING,
+  XP_PER_PHOTO_ADDITIONAL,
+  XP_PER_TASTING,
+} from './user.service.js';
 import { deleteObject, extractKeyFromPublicUrl, uploadBuffer } from './storage.service.js';
 import { clearMentions, syncMentions } from './mentions.service.js';
-import type { CreateTastingInput, ListTastingsQuery, UpdateTastingInput } from '../zod/tasting.zod.js';
+import type {
+  CreateTastingInput,
+  ListDiscoverPlacesQuery,
+  ListTastingsQuery,
+  UpdateTastingInput,
+} from '../zod/tasting.zod.js';
 
 // Champs d'auteur renvoyes par populate — gardes minimaux pour les feeds.
 export const AUTHOR_PROJECTION = 'username displayName avatarUrl' as const;
@@ -43,6 +61,21 @@ async function loadBlockedIds(viewerId: Types.ObjectId): Promise<Types.ObjectId[
 export async function createTasting(user: UserDoc, input: CreateTastingInput): Promise<TastingDoc> {
   const created = await TastingModel.create({ ...input, userId: user._id });
   await incrementTastingStats(user._id, created.type);
+
+  // Calcul du baseXp avec bonus qualite (encourage le contenu riche) :
+  // +5 si lieu, +5 si notes >= 50 chars, +3 si >= 3 aromas. Ces bonus sont
+  // additifs et plafonnes par la limite des champs eux-memes.
+  let baseXp = XP_PER_TASTING;
+  if (input.place?.name?.trim()) baseXp += XP_BONUS_PLACE;
+  if (input.notes && input.notes.length >= LONG_NOTES_THRESHOLD) baseXp += XP_BONUS_LONG_NOTES;
+  if (input.aromas && input.aromas.length >= MIN_AROMAS_FOR_BONUS) baseXp += XP_BONUS_AROMAS;
+  // Premiere degustation jamais publiee : bonus one-shot. Lu sur les stats
+  // *avant* l'increment (donc 0 si c'est la 1ere).
+  const previousCount = user.stats?.tastingsCount ?? 0;
+  if (previousCount === 0) baseXp += XP_FIRST_TASTING;
+
+  await awardTastingXp(user._id, baseXp);
+
   if (created.notes) {
     await syncMentions({
       sourceType: 'tasting_notes',
@@ -238,6 +271,157 @@ export async function listDiscoverTastings(viewer: UserDoc | null, query: ListTa
   };
 }
 
+// ============================================================
+// Decouverte des lieux
+// ============================================================
+
+// Un lieu agrege a partir des degustations publiques. Sert l'onglet
+// "Decouvrir" cote front (page Map) — on renvoie directement les places
+// stats-only, plutot que les degustations brutes a grouper en JS.
+export interface DiscoveredPlace {
+  placeId: string | null;
+  name: string;
+  lat: number;
+  lng: number;
+  tastingsCount: number;
+  averageRating: number;
+  lastTastingAt: Date;
+  coverPhotoUrl: string | null;
+  sampleTypes: TastingType[];
+}
+
+export interface PaginatedDiscoveredPlaces {
+  data: DiscoveredPlace[];
+  page: number;
+  limit: number;
+  total: number;
+  hasMore: boolean;
+}
+
+// Agrege les degustations publiques par lieu (placeId quand dispo, sinon
+// coords arrondies a la 4eme decimale ~= 11m). Tri par date de la derniere
+// degustation au lieu, decroissant : on surface ce qui s'est passe recemment.
+export async function listDiscoverPlaces(
+  viewer: UserDoc,
+  query: ListDiscoverPlacesQuery,
+): Promise<PaginatedDiscoveredPlaces> {
+  const blockedIds = await loadBlockedIds(viewer._id);
+
+  const match: Record<string, unknown> = {
+    visibility: 'public',
+    deletedAt: null,
+    // Un lieu n'est affichable sur la map que s'il a des coords.
+    'place.lat': { $exists: true, $ne: null },
+    'place.lng': { $exists: true, $ne: null },
+  };
+  if (query.type) match.type = query.type;
+  if (blockedIds.length > 0) match.userId = { $nin: blockedIds };
+
+  // Bounding box optionnelle : restreint le $match aux lieux dans le viewport
+  // du front. Reduit massivement le set traverse par l'aggregation. Note : le
+  // cas swLng > neLng (bbox qui chevauche l'antimeridien Pacifique) n'est pas
+  // gere ici — front responsable d'envoyer une bbox non-anti-meridienne.
+  if (query.bbox) {
+    match['place.lat'] = {
+      $exists: true,
+      $ne: null,
+      $gte: query.bbox.swLat,
+      $lte: query.bbox.neLat,
+    };
+    match['place.lng'] = {
+      $exists: true,
+      $ne: null,
+      $gte: query.bbox.swLng,
+      $lte: query.bbox.neLng,
+    };
+  }
+
+  const skip = (query.page - 1) * query.limit;
+
+  const result = await TastingModel.aggregate<{
+    data: DiscoveredPlace[];
+    totalArr: { count: number }[];
+  }>(
+    [
+    { $match: match },
+    // Projection minimale : on degage tout ce qui n'est pas utilise par le
+    // pipeline pour reduire la memoire utilisee dans le group.
+    {
+      $project: {
+        place: 1,
+        rating: 1,
+        type: 1,
+        photoUrls: 1,
+        createdAt: 1,
+      },
+    },
+    // Sort en amont du group pour que $first/$arrayElemAt prennent la cover
+    // photo du tasting le plus recent au lieu.
+    { $sort: { createdAt: -1 } },
+    {
+      // Cle de group sous forme d'objet — Mongo supporte les _id complexes
+      // nativement, plus robuste qu'une concat string ($toString/$round qui
+      // peuvent ne pas etre disponibles selon la version Mongo). On groupe par
+      // coords arrondies a la 4e decimale (~11m) : en pratique le placeId
+      // suit toujours les coords, donc on ne perd pas de fusion utile.
+      $group: {
+        _id: {
+          lat: { $round: ['$place.lat', 4] },
+          lng: { $round: ['$place.lng', 4] },
+        },
+        placeId: { $first: '$place.placeId' },
+        name: { $first: '$place.name' },
+        lat: { $first: '$place.lat' },
+        lng: { $first: '$place.lng' },
+        tastingsCount: { $sum: 1 },
+        averageRating: { $avg: '$rating' },
+        lastTastingAt: { $max: '$createdAt' },
+        // 1ere photo du tasting le + recent (ou null si pas de photo).
+        coverPhotoUrl: { $first: { $arrayElemAt: ['$photoUrls', 0] } },
+        sampleTypes: { $addToSet: '$type' },
+      },
+    },
+    {
+      $project: {
+        _id: 0,
+        placeId: { $ifNull: ['$placeId', null] },
+        name: 1,
+        lat: 1,
+        lng: 1,
+        tastingsCount: 1,
+        averageRating: { $round: ['$averageRating', 1] },
+        lastTastingAt: 1,
+        coverPhotoUrl: { $ifNull: ['$coverPhotoUrl', null] },
+        sampleTypes: 1,
+      },
+    },
+    { $sort: { lastTastingAt: -1 } },
+    {
+      // $facet : on recupere data paginee + total en un seul aller-retour.
+      // Si la collection grossit beaucoup, envisager de splitter en 2 requetes
+      // paralleles avec index sur (visibility, deletedAt, place.lat, place.lng).
+      $facet: {
+        data: [{ $skip: skip }, { $limit: query.limit }],
+        totalArr: [{ $count: 'count' }],
+      },
+    },
+    ],
+    { allowDiskUse: true },
+  );
+
+  const facet = result[0];
+  const data = facet?.data ?? [];
+  const total = facet?.totalArr[0]?.count ?? 0;
+
+  return {
+    data,
+    page: query.page,
+    limit: query.limit,
+    total,
+    hasMore: query.page * query.limit < total,
+  };
+}
+
 // --- Photos de tasting ---
 
 // Format carre 1080x1080 — assez gros pour zoom, optimal pour grilles type Instagram
@@ -272,6 +456,11 @@ export async function addTastingPhoto(user: UserDoc, id: string, file: Buffer): 
 
   tasting.photoUrls.push(publicUrl);
   await tasting.save();
+  // Bonus XP : photos additionnelles (2eme et +). La 1ere photo est deja
+  // valorisee dans le base XP de la creation, on n'en redonne pas ici.
+  if (tasting.photoUrls.length >= 2) {
+    await grantXp(user._id, XP_PER_PHOTO_ADDITIONAL);
+  }
   await tasting.populate('userId', AUTHOR_PROJECTION);
   return tasting;
 }

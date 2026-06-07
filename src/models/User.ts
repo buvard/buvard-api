@@ -4,7 +4,9 @@ import { TASTING_TYPES } from './Tasting.js';
 export const THEMES = ['light', 'dark', 'system'] as const;
 export type Theme = (typeof THEMES)[number];
 
-export const LANGUAGES = ['fr', 'en'] as const;
+// 'co' = corse — supporte cote front (i18n) mais a re-aligner cote back pour
+// que les prefs sync sans erreur de validation.
+export const LANGUAGES = ['fr', 'en', 'co'] as const;
 export type Language = (typeof LANGUAGES)[number];
 
 export const UNITS = ['metric', 'imperial'] as const;
@@ -70,10 +72,27 @@ const userSchema = new Schema(
     gamification: {
       xp: { type: Number, default: 0, index: true },
       level: { type: Number, default: 1 },
+      // Grade derive du level mais persiste : permet de querier "tous les
+      // sommeliers" sans recalculer cote app. Source de verite des paliers :
+      // GRADES dans user.service.ts. Default 'curious' = niveau 1.
+      grade: { type: String, default: 'curious' },
+      // Grade d'affichage choisi par le user (override visuel). Null = on
+      // utilise `grade` (auto-derive). Le user peut selectionner n'importe
+      // quel grade qu'il a deja debloque (level >= grade.minLevel).
+      displayGrade: { type: String, default: null },
       streak: {
         current: { type: Number, default: 0 },
         longest: { type: Number, default: 0 },
         lastActiveAt: { type: Date, default: null },
+      },
+      // Track des bonus XP one-shot deja attribues (pour ne pas les remettre).
+      // Chaque flag passe a true la 1ere fois que la condition est remplie.
+      bonusesGranted: {
+        profileComplete: { type: Boolean, default: false },
+        firstFollower: { type: Boolean, default: false },
+        streak7: { type: Boolean, default: false },
+        streak30: { type: Boolean, default: false },
+        streak100: { type: Boolean, default: false },
       },
     },
 
