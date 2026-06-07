@@ -4,7 +4,6 @@ import { AppError } from '../utils/AppError.js';
 import { TastingModel, type TastingDoc, type TastingType } from '../models/Tasting.js';
 import type { UserDoc } from '../models/User.js';
 import { BlockModel } from '../models/Block.js';
-import { FollowModel } from '../models/Follow.js';
 import {
   awardTastingXp,
   decrementTastingStats,
@@ -201,21 +200,15 @@ export async function deleteTasting(user: UserDoc, id: string): Promise<void> {
 // --- Feed & Discover ---
 
 export async function listFeedTastings(viewer: UserDoc, query: ListTastingsQuery): Promise<PaginatedTastings> {
-  // Comptes suivis par le viewer (l'auteur du tasting doit etre dans cette liste).
-  const follows = await FollowModel.find({ followerId: viewer._id }, { followingId: 1 }).lean();
-  const followingIds = follows.map((f) => f.followingId);
-
-  // Si l'utilisateur ne suit personne, on renvoie une page vide — la decouverte
-  // se fait via /discover.
-  if (followingIds.length === 0) {
-    return { data: [], page: query.page, limit: query.limit, total: 0, hasMore: false };
-  }
-
+  // Feed V1 : completement ouvert. Tous les tastings publics (auteurs non
+  // bloques). Les tastings prives n'apparaissent jamais ici, meme les siens —
+  // un brouillon prive reste un brouillon (visible uniquement sur son profil).
   const blockedIds = await loadBlockedIds(viewer._id);
+
   const filter: Record<string, unknown> = {
-    userId: { $in: followingIds, $nin: blockedIds },
     visibility: 'public',
     deletedAt: null,
+    userId: { $nin: blockedIds },
   };
   if (query.type) filter.type = query.type;
 
