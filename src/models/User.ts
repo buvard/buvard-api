@@ -4,7 +4,9 @@ import { TASTING_TYPES } from './Tasting.js';
 export const THEMES = ['light', 'dark', 'system'] as const;
 export type Theme = (typeof THEMES)[number];
 
-export const LANGUAGES = ['fr', 'en'] as const;
+// 'co' = corse — supporte cote front (i18n) mais a re-aligner cote back pour
+// que les prefs sync sans erreur de validation.
+export const LANGUAGES = ['fr', 'en', 'co'] as const;
 export type Language = (typeof LANGUAGES)[number];
 
 export const UNITS = ['metric', 'imperial'] as const;
@@ -66,14 +68,39 @@ const userSchema = new Schema(
     lastSeenAt: { type: Date, default: Date.now },
     onboardingCompletedAt: { type: Date, default: null },
 
+    // Features debloquees via codes (RedemptionCode). Pour l'instant un seul
+    // flag : pochtron = bonus testeur (acces aux features experimentales,
+    // badge VIP, etc. — tout regroupe sous ce nom). Le sous-doc reste
+    // extensible si on veut splitter en plusieurs flags plus tard.
+    features: {
+      pochtron: { type: Boolean, default: false },
+    },
+
     // Gamification
     gamification: {
       xp: { type: Number, default: 0, index: true },
       level: { type: Number, default: 1 },
+      // Grade derive du level mais persiste : permet de querier "tous les
+      // sommeliers" sans recalculer cote app. Source de verite des paliers :
+      // GRADES dans user.service.ts. Default 'curious' = niveau 1.
+      grade: { type: String, default: 'curious' },
+      // Grade d'affichage choisi par le user (override visuel). Null = on
+      // utilise `grade` (auto-derive). Le user peut selectionner n'importe
+      // quel grade qu'il a deja debloque (level >= grade.minLevel).
+      displayGrade: { type: String, default: null },
       streak: {
         current: { type: Number, default: 0 },
         longest: { type: Number, default: 0 },
         lastActiveAt: { type: Date, default: null },
+      },
+      // Track des bonus XP one-shot deja attribues (pour ne pas les remettre).
+      // Chaque flag passe a true la 1ere fois que la condition est remplie.
+      bonusesGranted: {
+        profileComplete: { type: Boolean, default: false },
+        firstFollower: { type: Boolean, default: false },
+        streak7: { type: Boolean, default: false },
+        streak30: { type: Boolean, default: false },
+        streak100: { type: Boolean, default: false },
       },
     },
 
@@ -116,6 +143,11 @@ const userSchema = new Schema(
   {
     timestamps: true,
     versionKey: false,
+    // Nom de collection explicite : evite la confusion avec la collection `user`
+    // (singulier) creee par Better Auth qui gere l'auth pure. Notre `userProfiles`
+    // stocke le profil metier etendu (username, prefs, stats, gamification, etc.)
+    // lie a l'auth via le champ `authUserId`.
+    collection: 'userProfiles',
     toJSON: {
       transform(_doc, ret: Record<string, unknown>) {
         ret.id = String(ret._id);

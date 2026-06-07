@@ -9,6 +9,17 @@ export const tastingIdParamSchema = z.object({
 
 const aromaSchema = z.string().trim().min(1).max(40);
 
+// Sous-schema lieu : nom obligatoire, geo/placeId optionnels (mais quasi
+// toujours renseignes quand selection via Google Places autocomplete cote front).
+const placeSchema = z
+  .object({
+    name: z.string().trim().min(1).max(200),
+    lat: z.number().min(-90).max(90).optional(),
+    lng: z.number().min(-180).max(180).optional(),
+    placeId: z.string().trim().max(200).optional(),
+  })
+  .strict();
+
 export const createTastingSchema = z
   .object({
     type: z.enum(TASTING_TYPES),
@@ -20,7 +31,7 @@ export const createTastingSchema = z
     rating: z.number().min(0.5).max(5).multipleOf(0.5),
     aromas: z.array(aromaSchema).max(20).optional(),
     notes: z.string().trim().max(2000).optional(),
-    photoUrl: z.url().optional(),
+    place: placeSchema.optional(),
     visibility: z.enum(VISIBILITIES).optional(),
   })
   .strict();
@@ -30,12 +41,49 @@ export const updateTastingSchema = createTastingSchema
   .strict()
   .refine((v) => Object.keys(v).length > 0, { error: 'Aucun champ a mettre a jour' });
 
+// Reordonne les photos d'un tasting via une permutation des indices actuels.
+// Ex: photoUrls actuel = [A, B, C] et order = [2, 0, 1] -> [C, A, B]
+// La permutation doit etre une bijection sur [0..n-1] et de meme longueur que
+// photoUrls (verifie cote service, on ne connait pas n dans le zod).
+export const reorderPhotosSchema = z.object({
+  order: z.array(z.number().int().min(0).max(99)).min(1).max(99),
+});
+
 export const listTastingsQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),
   type: z.enum(TASTING_TYPES).optional(),
 });
 
+// Bounding box "swLat,swLng,neLat,neLng" — coords en latitude/longitude WGS84.
+// On valide ici plutot que dans le service pour ne pas polluer la logique metier.
+const bboxRegex = /^-?\d+(\.\d+)?,-?\d+(\.\d+)?,-?\d+(\.\d+)?,-?\d+(\.\d+)?$/;
+
+export const listDiscoverPlacesQuerySchema = listTastingsQuerySchema.extend({
+  bbox: z
+    .string()
+    .regex(bboxRegex, 'Format attendu : swLat,swLng,neLat,neLng')
+    .optional()
+    .transform((raw) => {
+      if (!raw) return undefined;
+      const [swLat, swLng, neLat, neLng] = raw.split(',').map(Number);
+      return { swLat, swLng, neLat, neLng };
+    })
+    .pipe(
+      z
+        .object({
+          swLat: z.number().min(-90).max(90),
+          swLng: z.number().min(-180).max(180),
+          neLat: z.number().min(-90).max(90),
+          neLng: z.number().min(-180).max(180),
+        })
+        .refine((b) => b.swLat <= b.neLat, 'swLat doit être <= neLat')
+        .optional(),
+    ),
+});
+
 export type CreateTastingInput = z.infer<typeof createTastingSchema>;
 export type UpdateTastingInput = z.infer<typeof updateTastingSchema>;
 export type ListTastingsQuery = z.infer<typeof listTastingsQuerySchema>;
+export type ListDiscoverPlacesQuery = z.infer<typeof listDiscoverPlacesQuerySchema>;
+export type ReorderPhotosInput = z.infer<typeof reorderPhotosSchema>;

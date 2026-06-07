@@ -1,5 +1,11 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
 import { z } from 'zod';
+
+// Charge `.env.local` en priorite (overrides locaux, gitignored), puis `.env`
+// en fallback. dotenv ne reecrit pas les vars deja set -> les valeurs de
+// `.env.local` gagnent. Pattern equivalent a Vite cote front.
+dotenv.config({ path: '.env.local' });
+dotenv.config();
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),

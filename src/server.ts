@@ -3,11 +3,17 @@ import { logger } from './config/logger.js';
 import { connectDb, disconnectDb } from './config/db.js';
 import { initAuth } from './config/auth.js';
 import { buildApp } from './app.js';
+import { loadGradesCache, seedGrades } from './services/grade.service.js';
 
 async function main(): Promise<void> {
   await connectDb();
   // Better Auth depend du client mongo connecte, on l'init apres connectDb()
   initAuth();
+  // Seed idempotent des grades + chargement du cache memoire. Doit etre
+  // execute apres connectDb mais avant les premieres requetes (sinon
+  // getGradeForLevel renverrait undefined depuis un cache vide).
+  await seedGrades();
+  await loadGradesCache();
 
   const app = buildApp();
   const server = app.listen(env.PORT, () => {
