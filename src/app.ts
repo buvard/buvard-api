@@ -1,4 +1,5 @@
 import express, { type Express } from 'express';
+import mongoose from 'mongoose';
 import helmet from 'helmet';
 import cors from 'cors';
 import compression from 'compression';
@@ -10,6 +11,7 @@ import { APP_VERSION } from './config/version.js';
 import { getAuth } from './config/auth.js';
 import { errorHandler } from './middlewares/error.js';
 import { notFoundHandler } from './middlewares/notFound.js';
+import { apiLimiter, authLimiter } from './middlewares/rateLimit.js';
 import { apiRouter } from './routes/index.js';
 import { PUBLIC_DIR, renderLanding } from './views/landing.js';
 
@@ -30,8 +32,10 @@ export function buildApp(): Express {
   );
 
   // Routes Better Auth — montees AVANT express.json() car Better Auth lit
-  // le body brut via la Fetch API (Request global).
-  app.all('/api/auth/*splat', toNodeHandler(getAuth().handler));
+  // le body brut via la Fetch API (Request global). Le authLimiter (strict,
+  // par IP) protege le brute-force login/signup et doit etre pose avant le
+  // handler Better Auth.
+  app.all('/api/auth/*splat', authLimiter, toNodeHandler(getAuth().handler));
 
   app.use(express.json({ limit: '1mb' }));
   app.use(express.urlencoded({ extended: true, limit: '1mb' }));
@@ -43,11 +47,25 @@ export function buildApp(): Express {
   // Sert les assets statiques (favicon, etc.) — `index: false` car / est gere au-dessus
   app.use(express.static(PUBLIC_DIR, { index: false, maxAge: '1d' }));
 
+  // Health check : teste la connectivite Mongo (ping) pour que l'hebergeur ne
+  // considere pas l'API saine alors qu'elle est coupee de la DB. 503 si KO.
   app.get('/health', (_req, res) => {
-    res.json({ status: 'ok', version: APP_VERSION, uptime: process.uptime() });
+    void (async () => {
+      try {
+        await mongoose.connection.db?.admin().ping();
+        res.json({
+          status: 'ok',
+          version: APP_VERSION,
+          uptime: process.uptime(),
+          db: 'connected',
+        });
+      } catch {
+        res.status(503).json({ status: 'error', version: APP_VERSION, db: 'disconnected' });
+      }
+    })();
   });
 
-  app.use('/api', apiRouter);
+  app.use('/api', apiLimiter, apiRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

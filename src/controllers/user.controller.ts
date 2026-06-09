@@ -19,14 +19,15 @@ import {
   setAvatar,
   setCover,
   setDisplayGrade,
-  softDeleteMe,
   unblockUser,
   unfollowUser,
   updateMe,
   updatePrefs,
 } from '../services/user.service.js';
+import { exportAccountData, requestAccountDeletion } from '../services/account.service.js';
 import { listMentionsForUser } from '../services/mentions.service.js';
 import type {
+  CompleteOnboardingInput,
   ListFollowsQuery,
   MentionsQuery,
   RedeemCodeInput,
@@ -67,10 +68,22 @@ export async function postRedeemCode(req: Request, res: Response): Promise<void>
   res.json({ ...result, user: req.user.toJSON() });
 }
 
+// DELETE /me — demande de suppression (soft-delete, recuperable pendant la
+// periode de grace). L'anonymisation definitive est faite par le scheduler.
 export async function deleteMe(req: Request, res: Response): Promise<void> {
   if (!req.user) throw AppError.unauthorized();
-  await softDeleteMe(req.user);
+  await requestAccountDeletion(req.user);
   res.status(204).end();
+}
+
+// GET /me/export — export RGPD (art. 15 acces + art. 20 portabilite).
+// Renvoie un JSON telechargeable avec l'integralite des donnees du user.
+export async function getMyExport(req: Request, res: Response): Promise<void> {
+  if (!req.user) throw AppError.unauthorized();
+  const data = await exportAccountData(req.user);
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="buvard-export.json"');
+  res.send(JSON.stringify(data, null, 2));
 }
 
 export function getMyPrefs(req: Request, res: Response): void {
@@ -140,7 +153,8 @@ export async function getPublicProfile(req: Request, res: Response): Promise<voi
 
 export async function postCompleteOnboarding(req: Request, res: Response): Promise<void> {
   if (!req.user) throw AppError.unauthorized();
-  const user = await completeOnboarding(req.user);
+  const { birthDate } = req.body as CompleteOnboardingInput;
+  const user = await completeOnboarding(req.user, birthDate);
   res.json({ onboardingCompletedAt: user.onboardingCompletedAt });
 }
 

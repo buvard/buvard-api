@@ -6,8 +6,13 @@ import { TastingModel } from '../models/Tasting.js';
 import { FollowModel } from '../models/Follow.js';
 import { BlockModel } from '../models/Block.js';
 import { deleteObject, extractKeyFromPublicUrl, uploadBuffer } from './storage.service.js';
-import { clearMentions, syncMentions } from './mentions.service.js';
+import { syncMentions } from './mentions.service.js';
 import { getGradeForLevel, getGradeByKey as getGradeByKeyCached } from './grade.service.js';
+import { isAdult, MIN_AGE } from '../utils/age.js';
+import { isGraceExpired } from '../utils/grace.js';
+import { isDuplicateKeyError } from '../utils/mongoErrors.js';
+import { hasMorePages, pageSkip } from '../utils/pagination.js';
+import { createNotification } from './notification.service.js';
 import type { ListFollowsQuery, UpdateMeInput, UpdatePrefsInput } from '../zod/user.zod.js';
 
 // Valeurs par defaut des prefs — utilisees aussi en fallback pour d'eventuels users legacy
@@ -35,11 +40,6 @@ const DEFAULT_PREFS = {
 // Anti-spam pour lastSeenAt: pas d'update si vu il y a moins d'1 min
 const LAST_SEEN_THROTTLE_MS = 60_000;
 
-// Erreur Mongo de cle dupliquee (index unique viole)
-function isDuplicateKeyError(err: unknown): boolean {
-  return typeof err === 'object' && err !== null && 'code' in err && (err as { code?: unknown }).code === 11000;
-}
-
 // Genere un username unique a partir d'une base proposee par l'auth provider
 async function ensureUniqueUsername(base: string): Promise<string> {
   const normalized =
@@ -61,9 +61,12 @@ async function ensureUniqueUsername(base: string): Promise<string> {
   return candidate;
 }
 
-// Si l'user a ete soft-delete, on le restaure quand il revient
+// Si l'user a ete soft-delete et qu'on est ENCORE dans la periode de grace
+// (pas anonymise), on le restaure quand il revient. Au-dela de la grace, ou si
+// le compte est deja anonymise, on ne ressuscite pas : la PII a ete (ou va
+// etre) effacee, le compte est definitivement perdu.
 async function reviveIfDeleted(doc: UserDoc): Promise<UserDoc> {
-  if (doc.deletedAt) {
+  if (doc.deletedAt && !doc.anonymizedAt && !isGraceExpired(doc.deletedAt)) {
     doc.deletedAt = null;
     await doc.save();
   }
@@ -137,16 +140,22 @@ export async function findOrCreateUserFromAuth(authUser: AuthUserSeed): Promise<
   });
 }
 
-export async function softDeleteMe(user: UserDoc): Promise<void> {
-  user.deletedAt = new Date();
-  await user.save();
-  await clearMentions('bio', user._id);
-}
-
 export async function getUserByUsername(username: string): Promise<UserDoc> {
   const user = await UserModel.findOne({ username, deletedAt: null });
   if (!user) throw AppError.notFound('Utilisateur introuvable');
   return user;
+}
+
+// Enregistre la date de naissance (source de verite age gate) et derive
+// birthYear pour la retro-compat lecture. Re-valide la majorite cote serveur
+// meme si Zod l'a deja fait (defense en profondeur : un appelant interne
+// pourrait bypasser le schema).
+function setBirthDate(user: UserDoc, birthDate: Date): void {
+  if (!isAdult(birthDate)) {
+    throw AppError.forbidden(`Tu dois avoir au moins ${MIN_AGE} ans`);
+  }
+  user.birthDate = birthDate;
+  user.birthYear = birthDate.getFullYear();
 }
 
 export async function updateMe(user: UserDoc, input: UpdateMeInput): Promise<UserDoc> {
@@ -160,7 +169,7 @@ export async function updateMe(user: UserDoc, input: UpdateMeInput): Promise<Use
   if (input.bio !== undefined) user.bio = input.bio;
   // avatarUrl / coverUrl ne sont plus dans le schema de PATCH /me : ils sont
   // setes uniquement via les endpoints d'upload R2 dedies.
-  if (input.birthYear !== undefined) user.birthYear = input.birthYear;
+  if (input.birthDate !== undefined) setBirthDate(user, input.birthDate);
   if (input.favoriteCategories !== undefined) user.favoriteCategories = input.favoriteCategories;
   if (input.location !== undefined) {
     user.location = {
@@ -249,12 +258,18 @@ export async function getMyStats(user: UserDoc) {
 
 // --- Onboarding & legal ---
 
-export async function completeOnboarding(user: UserDoc): Promise<UserDoc> {
+// Complete l'onboarding. Exige une date de naissance majeure : c'est la 1ere
+// barriere de l'age gate (le compte ne peut pas etre "onboarde" sans age valide).
+export async function completeOnboarding(user: UserDoc, birthDate: Date): Promise<UserDoc> {
+  setBirthDate(user, birthDate);
   if (!user.onboardingCompletedAt) {
     user.onboardingCompletedAt = new Date();
     await user.save();
     // Bonus XP one-shot pour avoir termine l'onboarding.
     await grantXp(user._id, XP_ONBOARDING);
+  } else {
+    // Onboarding deja complete mais on a quand meme persiste/maj la birthDate.
+    await user.save();
   }
   return user;
 }
@@ -331,6 +346,9 @@ export async function followUser(actor: UserDoc, targetUsername: string): Promis
     );
   }
   await grantXp(target._id, bonus);
+
+  // Notif in-app au target (non bloquant — n'echoue jamais le follow).
+  void createNotification({ userId: target._id, actorId: actor._id, type: 'follow' });
 }
 
 export async function unfollowUser(actor: UserDoc, targetUsername: string): Promise<void> {
@@ -366,7 +384,7 @@ async function paginateUserIds(
   const [edges, total] = await Promise.all([
     FollowModel.find(filter)
       .sort({ createdAt: -1 })
-      .skip((query.page - 1) * query.limit)
+      .skip(pageSkip(query.page, query.limit))
       .limit(query.limit)
       .select(idField),
     FollowModel.countDocuments(filter),
@@ -395,7 +413,7 @@ async function paginateUserIds(
     page: query.page,
     limit: query.limit,
     total,
-    hasMore: query.page * query.limit < total,
+    hasMore: hasMorePages(query.page, query.limit, total),
   };
 }
 
@@ -460,7 +478,7 @@ export async function listBlocks(actor: UserDoc, query: ListFollowsQuery): Promi
   const [edges, total] = await Promise.all([
     BlockModel.find(filter)
       .sort({ createdAt: -1 })
-      .skip((query.page - 1) * query.limit)
+      .skip(pageSkip(query.page, query.limit))
       .limit(query.limit)
       .select('blockedId'),
     BlockModel.countDocuments(filter),
@@ -482,7 +500,7 @@ export async function listBlocks(actor: UserDoc, query: ListFollowsQuery): Promi
       bio: u.bio,
     }));
 
-  return { data, page: query.page, limit: query.limit, total, hasMore: query.page * query.limit < total };
+  return { data, page: query.page, limit: query.limit, total, hasMore: hasMorePages(query.page, query.limit, total) };
 }
 
 // --- Images: avatar & cover ---

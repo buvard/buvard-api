@@ -204,7 +204,13 @@ Protégé par `requireUser + requireActive + requireRole('admin')`.
 | `BETTER_AUTH_SECRET` | string ≥ 32 chars | Secret pour signer cookies/tokens (`openssl rand -hex 32`) |
 | `GOOGLE_CLIENT_ID` | string | Web Client ID Google Cloud Console |
 | `GOOGLE_CLIENT_SECRET` | string | Web Client Secret |
+| `APPLE_CLIENT_ID` | string (optionnel) | Service ID Apple (reverse-domain, ex. `app.buvard.signin`). Active Sign in with Apple si présent |
+| `APPLE_TEAM_ID` | string (optionnel) | Team ID Apple Developer (10 chars) |
+| `APPLE_KEY_ID` | string (optionnel) | Key ID de la clé privée Sign in with Apple |
+| `APPLE_PRIVATE_KEY` | string (optionnel) | Contenu du `.p8` (PEM ; les `\n` échappés sont restaurés au boot) |
+| `APPLE_APP_BUNDLE_ID` | string (optionnel) | Bundle id de l'app iOS — requis pour le flux natif (idToken) |
 | `PUBLIC_API_URL` | URL | URL publique du back (sans slash final). Utilisé comme `baseURL` Better Auth et pour les redirect URI Google |
+| `ACCOUNT_PURGE_GRACE_DAYS` | number (1–365) | Default 30. Délai entre la demande de suppression de compte (soft-delete récupérable) et l'anonymisation définitive |
 | `R2_ACCOUNT_ID` | string | Cloudflare R2 |
 | `R2_ACCESS_KEY_ID` | string | Cloudflare R2 |
 | `R2_SECRET_ACCESS_KEY` | string | Cloudflare R2 |
@@ -216,6 +222,26 @@ Protégé par `requireUser + requireActive + requireRole('admin')`.
 Pour que l'OAuth Google fonctionne, le Web Client ID doit avoir comme **Authorized redirect URI** :
 - Staging : `https://api-staging.buvard.app/api/auth/callback/google`
 - Prod : `https://api.buvard.app/api/auth/callback/google`
+
+### Sign in with Apple (obligatoire App Store)
+
+Apple impose Sign in with Apple dès qu'un autre login social est proposé (Google). Sans les
+variables `APPLE_*`, le provider reste inactif au boot (le serveur démarre quand même), mais
+l'app sera rejetée à la review iOS. Procédure dans le [Apple Developer Portal](https://developer.apple.com/account/resources) :
+
+1. **App ID** (Identifiers → App IDs) : créer/éditer l'App ID de l'app iOS, activer la capacité
+   **Sign In with Apple**. Le bundle id (ex. `app.buvard`) → `APPLE_APP_BUNDLE_ID`.
+2. **Service ID** (Identifiers → Services IDs) : créer un Service ID (ex. `app.buvard.signin`)
+   → `APPLE_CLIENT_ID`. Configurer ses **Return URLs** :
+   - Staging : `https://api-staging.buvard.app/api/auth/callback/apple`
+   - Prod : `https://api.buvard.app/api/auth/callback/apple`
+3. **Key** (Keys → +) : créer une clé, activer **Sign In with Apple**, l'associer à l'App ID.
+   Télécharger le fichier **`.p8`** (une seule fois !). Le Key ID affiché → `APPLE_KEY_ID`.
+   Le contenu du `.p8` → `APPLE_PRIVATE_KEY` (coller le PEM, les `\n` sont gérés).
+4. **Team ID** : visible en haut à droite du portail (Membership) → `APPLE_TEAM_ID`.
+
+Le client secret Apple est un **JWT signé ES256** régénéré automatiquement à chaque boot du
+serveur (valable 180j max côté Apple). Un redeploy/restart régulier suffit à le rafraîchir.
 
 ## Storage Cloudflare R2
 

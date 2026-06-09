@@ -1,7 +1,9 @@
 import { Router } from 'express';
 import { attachUserIfAuth, requireUser } from '../../middlewares/auth.js';
 import { requireActive } from '../../middlewares/requireActive.js';
+import { requireAdult } from '../../middlewares/requireAdult.js';
 import { imageUpload } from '../../middlewares/upload.js';
+import { mutationLimiter, uploadLimiter } from '../../middlewares/rateLimit.js';
 import { validate } from '../../middlewares/validate.js';
 import {
   createTastingSchema,
@@ -11,6 +13,8 @@ import {
   tastingIdParamSchema,
   updateTastingSchema,
 } from '../../zod/tasting.zod.js';
+import { createReportSchema } from '../../zod/report.zod.js';
+import { postReportTasting } from '../../controllers/report.controller.js';
 import {
   deleteAllTastingPhotos,
   deleteOne,
@@ -44,7 +48,7 @@ tastingRouter.get(
   listDiscoverPlacesHandler,
 );
 
-tastingRouter.post('/', requireUser, validate(createTastingSchema), postTasting);
+tastingRouter.post('/', requireUser, requireActive, requireAdult, mutationLimiter, validate(createTastingSchema), postTasting);
 tastingRouter.get('/', requireUser, validate(listTastingsQuerySchema, 'query'), listMine);
 tastingRouter.get('/:id', attachUserIfAuth, validate(tastingIdParamSchema, 'params'), getOne);
 tastingRouter.patch('/:id', requireUser, validate(tastingIdParamSchema, 'params'), validate(updateTastingSchema), patchOne);
@@ -55,6 +59,8 @@ tastingRouter.post(
   '/:id/photos',
   requireUser,
   requireActive,
+  requireAdult,
+  uploadLimiter,
   validate(tastingIdParamSchema, 'params'),
   imageUpload.single('file'),
   postTastingPhoto,
@@ -88,6 +94,7 @@ tastingRouter.post(
   '/:id/like',
   requireUser,
   requireActive,
+  mutationLimiter,
   validate(tastingIdParamSchema, 'params'),
   postTastingLike,
 );
@@ -104,4 +111,15 @@ tastingRouter.get(
   attachUserIfAuth,
   validate(tastingIdParamSchema, 'params'),
   listLikers,
+);
+
+// Signalement d'un tasting (contenu UGC) — moderation. Mutation limitee.
+tastingRouter.post(
+  '/:id/report',
+  requireUser,
+  requireActive,
+  mutationLimiter,
+  validate(tastingIdParamSchema, 'params'),
+  validate(createReportSchema),
+  postReportTasting,
 );

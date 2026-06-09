@@ -2,6 +2,8 @@ import type { Types } from 'mongoose';
 import { MentionModel, type MentionSourceType } from '../models/Mention.js';
 import { UserModel } from '../models/User.js';
 import { BlockModel } from '../models/Block.js';
+import { hasMorePages, pageSkip } from '../utils/pagination.js';
+import { createNotification } from './notification.service.js';
 
 // Regex: @ suivi des caracteres autorises pour un username (a-z 0-9 _ . -)
 // On exige une frontiere (debut ou char non-word) en amont pour eviter de matcher "email@domain"
@@ -79,6 +81,13 @@ export async function syncMentions(params: SyncMentionsParams): Promise<void> {
         { ordered: false }, // ignore les eventuels duplicates race
       ).catch(() => undefined), // best-effort sur dups
     );
+    // Notif in-app a chaque NOUVEAU mentionne (pas aux re-syncs). Non bloquant.
+    // Le contexte tasting n'existe que pour les mentions dans des notes de
+    // tasting (sourceId = tastingId) ; pour la bio, pas de tasting.
+    const tastingId = sourceType === 'tasting_notes' ? sourceId : undefined;
+    for (const mentionedId of toCreate) {
+      void createNotification({ userId: mentionedId, actorId: mentionerId, type: 'mention', tastingId });
+    }
   }
   if (toDelete.length > 0) {
     ops.push(
@@ -129,7 +138,7 @@ export async function listMentionsForUser(
   const [mentions, total] = await Promise.all([
     MentionModel.find(filter)
       .sort({ createdAt: -1 })
-      .skip((page - 1) * limit)
+      .skip(pageSkip(page, limit))
       .limit(limit),
     MentionModel.countDocuments(filter),
   ]);
@@ -158,5 +167,5 @@ export async function listMentionsForUser(
     };
   });
 
-  return { data, page, limit, total, hasMore: page * limit < total };
+  return { data, page, limit, total, hasMore: hasMorePages(page, limit, total) };
 }

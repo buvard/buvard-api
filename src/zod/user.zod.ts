@@ -6,6 +6,7 @@ import {
   UNITS,
 } from '../models/User.js';
 import { TASTING_TYPES } from '../models/Tasting.js';
+import { MIN_AGE, MIN_BIRTH_DATE, isAdult } from '../utils/age.js';
 
 export const usernameSchema = z
   .string()
@@ -22,8 +23,15 @@ const locationSchema = z
   })
   .strict();
 
-const MIN_AGE = 18;
-const CURRENT_YEAR = new Date().getFullYear();
+// Date de naissance : accepte une string ISO (ex. "2000-05-14") ou une date,
+// borne entre 1900 et aujourd'hui, et DOIT correspondre a un age >= MIN_AGE.
+// Source de verite de l'age gate. birthYear (annee seule) est deprecie et
+// derive de birthDate cote service — il n'est plus accepte en entree.
+export const birthDateSchema = z.coerce
+  .date()
+  .min(MIN_BIRTH_DATE, { error: 'Date de naissance invalide' })
+  .refine((d) => d <= new Date(), { error: 'Date de naissance dans le futur' })
+  .refine((d) => isAdult(d), { error: `Tu dois avoir au moins ${MIN_AGE} ans` });
 
 // avatarUrl et coverUrl sont gerees via des endpoints dedies (POST/DELETE
 // /me/avatar et /me/cover, qui uploadent en R2). On les retire du PATCH /me
@@ -35,11 +43,19 @@ export const updateMeSchema = z
     displayName: z.string().trim().max(60).optional(),
     bio: z.string().trim().max(280).optional(),
     location: locationSchema.optional(),
-    birthYear: z.number().int().min(1900).max(CURRENT_YEAR - MIN_AGE).optional(),
+    birthDate: birthDateSchema.optional(),
     favoriteCategories: z.array(z.enum(TASTING_TYPES)).max(TASTING_TYPES.length).optional(),
   })
   .strict()
   .refine((v) => Object.keys(v).length > 0, { error: 'Aucun champ a mettre a jour' });
+
+// Completion d'onboarding : exige une date de naissance valide et majeure.
+// C'est la 1ere barriere de l'age gate.
+export const completeOnboardingSchema = z
+  .object({
+    birthDate: birthDateSchema,
+  })
+  .strict();
 
 const notificationsPrefsSchema = z
   .object({
@@ -122,6 +138,7 @@ export const setDisplayGradeSchema = z.object({
 });
 
 export type UpdateMeInput = z.infer<typeof updateMeSchema>;
+export type CompleteOnboardingInput = z.infer<typeof completeOnboardingSchema>;
 export type UpdatePrefsInput = z.infer<typeof updatePrefsSchema>;
 export type ListFollowsQuery = z.infer<typeof listFollowsQuerySchema>;
 export type SearchUsersQuery = z.infer<typeof searchUsersQuerySchema>;

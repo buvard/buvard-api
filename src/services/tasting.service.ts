@@ -4,6 +4,7 @@ import { AppError } from '../utils/AppError.js';
 import { TastingModel, type TastingDoc, type TastingType } from '../models/Tasting.js';
 import type { UserDoc } from '../models/User.js';
 import { BlockModel } from '../models/Block.js';
+import { LikeModel } from '../models/Like.js';
 import {
   awardTastingXp,
   decrementTastingStats,
@@ -19,6 +20,7 @@ import {
   XP_PER_TASTING,
 } from './user.service.js';
 import { deleteObject, extractKeyFromPublicUrl, uploadBuffer } from './storage.service.js';
+import { hasMorePages, pageSkip } from '../utils/pagination.js';
 import { clearMentions, syncMentions } from './mentions.service.js';
 import type {
   CreateTastingInput,
@@ -95,7 +97,7 @@ export async function listMyTastings(user: UserDoc, query: ListTastingsQuery): P
     TastingModel.find(filter)
       .populate('userId', AUTHOR_PROJECTION)
       .sort({ createdAt: -1 })
-      .skip((query.page - 1) * query.limit)
+      .skip(pageSkip(query.page, query.limit))
       .limit(query.limit),
     TastingModel.countDocuments(filter),
   ]);
@@ -105,7 +107,7 @@ export async function listMyTastings(user: UserDoc, query: ListTastingsQuery): P
     page: query.page,
     limit: query.limit,
     total,
-    hasMore: query.page * query.limit < total,
+    hasMore: hasMorePages(query.page, query.limit, total),
   };
 }
 
@@ -121,7 +123,7 @@ export async function listPublicTastingsForUser(userId: Types.ObjectId, query: L
     TastingModel.find(filter)
       .populate('userId', AUTHOR_PROJECTION)
       .sort({ createdAt: -1 })
-      .skip((query.page - 1) * query.limit)
+      .skip(pageSkip(query.page, query.limit))
       .limit(query.limit),
     TastingModel.countDocuments(filter),
   ]);
@@ -131,7 +133,7 @@ export async function listPublicTastingsForUser(userId: Types.ObjectId, query: L
     page: query.page,
     limit: query.limit,
     total,
-    hasMore: query.page * query.limit < total,
+    hasMore: hasMorePages(query.page, query.limit, total),
   };
 }
 
@@ -190,6 +192,10 @@ export async function deleteTasting(user: UserDoc, id: string): Promise<void> {
   await tasting.save();
   await decrementTastingStats(user._id, tasting.type);
   await clearMentions('tasting_notes', tasting._id);
+  // Les likes d'un tasting supprime n'ont plus de sens : on les purge (pas de
+  // feature "restore" qui les attendrait). Les listings de likers filtrent deja
+  // sur le tasting non supprime, mais ca evite des docs Like orphelins.
+  await LikeModel.deleteMany({ tastingId: tasting._id });
 
   // Cleanup R2 — fire-and-forget pattern, on n'echoue pas la suppression du
   // tasting si R2 down. Tradeoff : la photo est definitivement perdue (pas
@@ -216,7 +222,7 @@ export async function listFeedTastings(viewer: UserDoc, query: ListTastingsQuery
     TastingModel.find(filter)
       .populate('userId', AUTHOR_PROJECTION)
       .sort({ createdAt: -1 })
-      .skip((query.page - 1) * query.limit)
+      .skip(pageSkip(query.page, query.limit))
       .limit(query.limit),
     TastingModel.countDocuments(filter),
   ]);
@@ -226,7 +232,7 @@ export async function listFeedTastings(viewer: UserDoc, query: ListTastingsQuery
     page: query.page,
     limit: query.limit,
     total,
-    hasMore: query.page * query.limit < total,
+    hasMore: hasMorePages(query.page, query.limit, total),
   };
 }
 
@@ -250,7 +256,7 @@ export async function listDiscoverTastings(viewer: UserDoc | null, query: ListTa
     TastingModel.find(filter)
       .populate('userId', AUTHOR_PROJECTION)
       .sort({ createdAt: -1 })
-      .skip((query.page - 1) * query.limit)
+      .skip(pageSkip(query.page, query.limit))
       .limit(query.limit),
     TastingModel.countDocuments(filter),
   ]);
@@ -260,7 +266,7 @@ export async function listDiscoverTastings(viewer: UserDoc | null, query: ListTa
     page: query.page,
     limit: query.limit,
     total,
-    hasMore: query.page * query.limit < total,
+    hasMore: hasMorePages(query.page, query.limit, total),
   };
 }
 
@@ -329,7 +335,7 @@ export async function listDiscoverPlaces(
     };
   }
 
-  const skip = (query.page - 1) * query.limit;
+  const skip = pageSkip(query.page, query.limit);
 
   const result = await TastingModel.aggregate<{
     data: DiscoveredPlace[];
@@ -411,7 +417,7 @@ export async function listDiscoverPlaces(
     page: query.page,
     limit: query.limit,
     total,
-    hasMore: query.page * query.limit < total,
+    hasMore: hasMorePages(query.page, query.limit, total),
   };
 }
 

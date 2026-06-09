@@ -2,6 +2,8 @@ export type AppErrorCode =
   | 'BAD_REQUEST'
   | 'UNAUTHORIZED'
   | 'FORBIDDEN'
+  | 'AGE_REQUIRED'
+  | 'UNDERAGE'
   | 'NOT_FOUND'
   | 'CONFLICT'
   | 'UNPROCESSABLE'
@@ -12,6 +14,10 @@ const statusByCode: Record<AppErrorCode, number> = {
   BAD_REQUEST: 400,
   UNAUTHORIZED: 401,
   FORBIDDEN: 403,
+  // Age gate : 403 mais codes distincts pour que le front sache reagir —
+  // AGE_REQUIRED -> ecran de saisie de date, UNDERAGE -> refus definitif.
+  AGE_REQUIRED: 403,
+  UNDERAGE: 403,
   NOT_FOUND: 404,
   CONFLICT: 409,
   UNPROCESSABLE: 422,
@@ -46,5 +52,16 @@ export class AppError extends Error {
   }
   static conflict(message: string): AppError {
     return new AppError('CONFLICT', message);
+  }
+  static tooManyRequests(message = 'Trop de requetes, reessaie plus tard'): AppError {
+    return new AppError('TOO_MANY_REQUESTS', message);
+  }
+  // Age gate : date de naissance non renseignee (le front doit la demander).
+  static ageRequired(message = 'Date de naissance requise'): AppError {
+    return new AppError('AGE_REQUIRED', message);
+  }
+  // Age gate : user mineur (refus definitif).
+  static underage(message: string): AppError {
+    return new AppError('UNDERAGE', message);
   }
 }

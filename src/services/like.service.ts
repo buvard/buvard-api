@@ -5,10 +5,9 @@ import { TastingModel } from '../models/Tasting.js';
 import { BlockModel } from '../models/Block.js';
 import type { UserDoc } from '../models/User.js';
 import { grantXp, XP_PER_LIKE_RECEIVED } from './user.service.js';
-
-function isDuplicateKeyError(err: unknown): boolean {
-  return typeof err === 'object' && err !== null && 'code' in err && (err as { code?: unknown }).code === 11000;
-}
+import { isDuplicateKeyError } from '../utils/mongoErrors.js';
+import { hasMorePages, pageSkip } from '../utils/pagination.js';
+import { createNotification } from './notification.service.js';
 
 // Verifie que le viewer peut liker (tasting existe + visible + pas de block entre viewer et auteur).
 async function assertCanLike(userId: Types.ObjectId, tastingId: string): Promise<{ tastingObjectId: Types.ObjectId; authorId: Types.ObjectId }> {
@@ -45,9 +44,17 @@ export async function likeTasting(user: UserDoc, tastingId: string): Promise<{ l
       { $inc: { likesCount: 1 } },
       { new: true, projection: { likesCount: 1 } },
     );
-    // Bonus XP au proprietaire du tasting (pas d'auto-like).
+    // Bonus XP + notif au proprietaire du tasting (pas d'auto-like). La notif
+    // n'est creee qu'ici, donc une seule fois par like (pas de spam si
+    // like/unlike/like). Non bloquant.
     if (!authorId.equals(user._id)) {
       await grantXp(authorId, XP_PER_LIKE_RECEIVED);
+      void createNotification({
+        userId: authorId,
+        actorId: user._id,
+        type: 'like',
+        tastingId: tastingObjectId,
+      });
     }
     return { liked: true, likesCount: updated?.likesCount ?? 0 };
   } catch (err) {
@@ -129,7 +136,7 @@ export async function listTastingLikers(
   const [likes, total] = await Promise.all([
     LikeModel.find(filter)
       .sort({ createdAt: -1 })
-      .skip((page - 1) * limit)
+      .skip(pageSkip(page, limit))
       .limit(limit)
       .populate('userId', 'username displayName avatarUrl deletedAt'),
     LikeModel.countDocuments(filter),
@@ -154,5 +161,5 @@ export async function listTastingLikers(
     });
   }
 
-  return { data, page, limit, total, hasMore: page * limit < total };
+  return { data, page, limit, total, hasMore: hasMorePages(page, limit, total) };
 }

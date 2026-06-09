@@ -29,10 +29,37 @@ const envSchema = z.object({
   GOOGLE_CLIENT_ID: z.string().min(1),
   GOOGLE_CLIENT_SECRET: z.string().min(1),
 
+  // Sign in with Apple — OBLIGATOIRE App Store des qu'un autre login social
+  // (Google) est propose (regle 4.8). Toutes optionnelles : si non remplies,
+  // le provider Apple n'est pas active (utile en dev/staging tant que les
+  // identifiants Apple Developer ne sont pas crees). Pour l'activer, les 5
+  // doivent etre presentes.
+  //   APPLE_CLIENT_ID            : Service ID (reverse-domain, ex. app.buvard.signin)
+  //   APPLE_TEAM_ID              : Team ID (10 chars, Apple Developer Portal)
+  //   APPLE_KEY_ID               : Key ID de la cle privee Sign in with Apple
+  //   APPLE_PRIVATE_KEY          : contenu du .p8 (PEM, avec \n echappes)
+  //   APPLE_APP_BUNDLE_ID        : bundle id de l'app iOS (flux natif idToken)
+  APPLE_CLIENT_ID: z.string().min(1).optional(),
+  APPLE_TEAM_ID: z.string().min(1).optional(),
+  APPLE_KEY_ID: z.string().min(1).optional(),
+  APPLE_PRIVATE_KEY: z
+    .string()
+    .min(1)
+    .optional()
+    // Les sauts de ligne d'une cle PEM sont souvent stockes echappes ("\n")
+    // dans les variables d'env -> on les restaure.
+    .transform((v) => (v ? v.replace(/\\n/g, '\n') : v)),
+  APPLE_APP_BUNDLE_ID: z.string().min(1).optional(),
+
   // URL publique de l'API (sans slash final). Utilisee par Better Auth comme
   // baseURL pour generer les URLs de callback OAuth.
   // staging -> https://api-staging.buvard.app, prod -> https://api.buvard.app.
   PUBLIC_API_URL: z.url(),
+
+  // Periode de grace (jours) entre la demande de suppression de compte
+  // (soft-delete, recuperable) et l'anonymisation definitive (irreversible).
+  // Standard industrie : 30j.
+  ACCOUNT_PURGE_GRACE_DAYS: z.coerce.number().int().min(1).max(365).default(30),
 
   // Cloudflare R2 — stockage S3-compatible pour avatars / covers
   R2_ACCOUNT_ID: z.string().min(1),

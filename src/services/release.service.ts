@@ -4,6 +4,7 @@ import { compareVersions } from '../utils/version.js';
 import { AppReleaseModel, type AppPlatform, type AppReleaseDoc } from '../models/AppRelease.js';
 import { deleteObject, uploadBuffer } from './storage.service.js';
 import type { CreateReleaseInput, UpdateReleaseInput } from '../zod/release.zod.js';
+import { isDuplicateKeyError } from '../utils/mongoErrors.js';
 
 interface CreateReleaseParams extends CreateReleaseInput {
   file: Buffer;
@@ -12,11 +13,6 @@ interface CreateReleaseParams extends CreateReleaseInput {
 // Calcule un SHA-256 hex sur un buffer
 function computeSha256(buf: Buffer): string {
   return createHash('sha256').update(buf).digest('hex');
-}
-
-// Erreur Mongo de cle dupliquee (index unique platform+version)
-function isDuplicateKeyError(err: unknown): boolean {
-  return typeof err === 'object' && err !== null && 'code' in err && (err as { code?: unknown }).code === 11000;
 }
 
 export async function createRelease(params: CreateReleaseParams): Promise<AppReleaseDoc> {

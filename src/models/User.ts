@@ -54,7 +54,10 @@ const userSchema = new Schema(
       country: { type: String, trim: true, uppercase: true, minlength: 2, maxlength: 2 },
       city: { type: String, trim: true, maxlength: 80 },
     },
+    // birthYear : legacy, conserve en lecture. birthDate (date complete) est
+    // desormais la source de verite pour l'age gate (calcul exact au jour pres).
     birthYear: { type: Number, min: 1900 },
+    birthDate: { type: Date, default: null },
     favoriteCategories: { type: [String], enum: TASTING_TYPES, default: [] },
 
     // Role & statut compte
@@ -138,7 +141,13 @@ const userSchema = new Schema(
     acceptedPrivacyAt: { type: Date, default: null },
     reportsReceivedCount: { type: Number, default: 0 },
 
-    deletedAt: { type: Date, default: null },
+    // Suppression de compte en 2 temps (RGPD) :
+    //   deletedAt    -> demande de suppression : compte masque partout mais
+    //                   recuperable pendant la periode de grace (login = revive).
+    //   anonymizedAt -> anonymisation definitive apres la periode de grace :
+    //                   PII effacee, irreversible (plus de revive possible).
+    deletedAt: { type: Date, default: null, index: true },
+    anonymizedAt: { type: Date, default: null },
   },
   {
     timestamps: true,

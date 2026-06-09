@@ -4,11 +4,13 @@ import { connectDb, disconnectDb } from './config/db.js';
 import { initAuth } from './config/auth.js';
 import { buildApp } from './app.js';
 import { loadGradesCache, seedGrades } from './services/grade.service.js';
+import { startScheduler, stopScheduler } from './config/scheduler.js';
 
 async function main(): Promise<void> {
   await connectDb();
-  // Better Auth depend du client mongo connecte, on l'init apres connectDb()
-  initAuth();
+  // Better Auth depend du client mongo connecte, on l'init apres connectDb().
+  // Async car la generation du client secret Apple est asynchrone.
+  await initAuth();
   // Seed idempotent des grades + chargement du cache memoire. Doit etre
   // execute apres connectDb mais avant les premieres requetes (sinon
   // getGradeForLevel renverrait undefined depuis un cache vide).
@@ -20,8 +22,12 @@ async function main(): Promise<void> {
     logger.info({ port: env.PORT, env: env.NODE_ENV }, 'buvard-api en ecoute');
   });
 
+  // Taches periodiques (anonymisation des comptes supprimes, etc.)
+  startScheduler();
+
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, 'arret en cours...');
+    stopScheduler();
     server.close(() => logger.info('http server ferme'));
     try {
       await disconnectDb();
